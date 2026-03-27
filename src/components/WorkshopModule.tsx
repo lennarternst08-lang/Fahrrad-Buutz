@@ -87,13 +87,6 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
       timerRef.current = window.setInterval(() => {
         setTime((prev) => {
           const newTime = prev + 1;
-          // Save to parent state every 30 seconds to prevent data loss
-          if (newTime % 30 === 0 && activeBikeId) {
-            updateBike(activeBikeId, { 
-              timeSpentSeconds: newTime,
-              startTime: Date.now() 
-            });
-          }
           return newTime;
         });
       }, 1000);

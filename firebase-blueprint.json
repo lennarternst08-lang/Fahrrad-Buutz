@@ -43,6 +43,18 @@
         "checklist": { "type": "array", "items": { "$ref": "#/entities/ChecklistItem" } },
         "notes": { "type": "string" },
         "photos": { "type": "array", "items": { "type": "string" } },
+        "workLogs": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "timestamp": { "type": "string" },
+              "durationSeconds": { "type": "number" }
+            },
+            "required": ["id", "timestamp", "durationSeconds"]
+          } 
+        },
         "userId": { "type": "string" }
       },
       "required": ["id", "name", "status", "purchasePrice", "purchaseDate", "timeSpentSeconds", "lastModified", "expenses", "checklist", "notes", "photos", "userId"]

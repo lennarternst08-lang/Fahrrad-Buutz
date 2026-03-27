@@ -6,7 +6,7 @@ import { Bike, DailyTodo, Log } from './types';
 import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X, LogIn, LogOut, RotateCcw } from 'lucide-react';
 import { auth, db, signInWithGoogle, logout } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 
 enum OperationType {
   CREATE = 'create',
@@ -697,6 +697,7 @@ export default function App() {
 
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [logFilter, setLogFilter] = useState<'all' | 'tracking' | 'workshop' | 'stopwatch' | 'system'>('all');
   const [logSortOrder, setLogSortOrder] = useState<'desc' | 'asc'>('desc');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -889,7 +890,13 @@ export default function App() {
       
       const updatedBike = { ...bike, ...updates, lastModified: Date.now() };
       if (auth.currentUser) {
-        setDoc(doc(db, 'bikes', id), updatedBike).catch(e => handleFirestoreError(e, OperationType.UPDATE, 'bikes'));
+        setIsSyncing(true);
+        updateDoc(doc(db, 'bikes', id), { ...updates, lastModified: Date.now() })
+          .then(() => setIsSyncing(false))
+          .catch(e => {
+            setIsSyncing(false);
+            handleFirestoreError(e, OperationType.UPDATE, 'bikes');
+          });
       } else {
         setBikes((prev) => prev.map((b) => (b.id === id ? updatedBike : b)));
       }
@@ -965,7 +972,13 @@ export default function App() {
     const updatedTodo = { ...todo, completed: newStatus };
     
     if (auth.currentUser) {
-      setDoc(doc(db, 'todos', id), updatedTodo).catch(e => handleFirestoreError(e, OperationType.UPDATE, 'todos'));
+      setIsSyncing(true);
+      updateDoc(doc(db, 'todos', id), { completed: newStatus })
+        .then(() => setIsSyncing(false))
+        .catch(e => {
+          setIsSyncing(false);
+          handleFirestoreError(e, OperationType.UPDATE, 'todos');
+        });
     } else {
       setDailyTodos(prev => prev.map(t => t.id === id ? updatedTodo : t));
     }
@@ -1180,7 +1193,20 @@ export default function App() {
           <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
             <Wrench className="w-5 h-5 text-white" />
           </div>
-          <span className="font-bold text-xl tracking-tight text-slate-100">Flip<span className="text-orange-500">Bike</span></span>
+          <div className="flex flex-col">
+            <span className="font-bold text-xl tracking-tight text-slate-100 leading-none">Flip<span className="text-orange-500">Bike</span></span>
+            {user ? (
+              <div className="flex items-center mt-1">
+                <div className={`w-1.5 h-1.5 rounded-full mr-1.5 ${isSyncing ? 'bg-orange-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">{isSyncing ? 'Synchronisiert...' : 'Synchronisiert'}</span>
+              </div>
+            ) : (
+              <div className="flex items-center mt-1">
+                <div className="w-1.5 h-1.5 rounded-full mr-1.5 bg-slate-500"></div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Lokal gespeichert</span>
+              </div>
+            )}
+          </div>
         </div>
         
         {/* Desktop Tabs */}

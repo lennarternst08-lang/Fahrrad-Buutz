@@ -126,6 +126,17 @@ export function TrackingModule({
   });
 
   const [isReady, setIsReady] = useState(!initialScrollPos);
+  const [, setTick] = useState(0);
+
+  // Periodic re-render to update running timers
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      if (bikes.some(b => b.startTime)) {
+        setTick(t => t + 1);
+      }
+    }, 10000); // Update every 10 seconds
+    return () => clearInterval(interval);
+  }, [bikes]);
 
   const [salePromptBikeId, setSalePromptBikeId] = useState<string | null>(null);
   const [salePromptPrice, setSalePromptPrice] = useState<string>('');
@@ -886,9 +897,12 @@ export function TrackingModule({
                               setEditHours(Math.floor(bike.timeSpentSeconds / 3600));
                               setEditMinutes(Math.floor((bike.timeSpentSeconds % 3600) / 60));
                             }}
-                            className="text-slate-300 px-2 hover:text-orange-400 transition-colors"
+                            className="text-slate-300 px-2 hover:text-orange-400 transition-colors flex items-center"
                           >
-                            {(bike.timeSpentSeconds / 3600).toFixed(1)}h
+                            {bike.startTime && (
+                              <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse mr-1.5 shrink-0"></div>
+                            )}
+                            {((bike.timeSpentSeconds + (bike.startTime ? Math.floor((Date.now() - bike.startTime) / 1000) : 0)) / 3600).toFixed(1)}h
                           </button>
                         </td>
                       )}

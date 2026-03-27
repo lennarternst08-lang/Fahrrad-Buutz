@@ -14,41 +14,79 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
+         (request.auth.token.email == "lennarternst08@gmail.com" && request.auth.token.email_verified == true));
     }
-    
-    function uidUnchanged() {
-      return !('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid;
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
     }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
     
-    function uidNotModified() {
-      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId;
+    function isValidBike(data) {
+      return hasRequiredFields(['id', 'name', 'status', 'purchasePrice', 'purchaseDate', 'timeSpentSeconds', 'lastModified', 'expenses', 'checklist', 'notes', 'photos', 'userId']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.status in ["Zu reparieren", "Inseriert", "Verkauft", "Infrastruktur"] &&
+             data.purchasePrice is number &&
+             data.timeSpentSeconds is number &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidTodo(data) {
+      return hasRequiredFields(['id', 'text', 'completed', 'userId']) &&
+             data.id is string &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 500 &&
+             data.completed is bool &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidLog(data) {
+      return hasRequiredFields(['id', 'timestamp', 'message', 'module', 'userId']) &&
+             data.id is string &&
+             data.timestamp is number &&
+             data.message is string && data.message.size() < 1000 &&
+             data.module in ["tracking", "workshop", "stopwatch", "system"] &&
+             data.userId == request.auth.uid;
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
     
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
     match /bikes/{bikeId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidBike(request.resource.data);
+      allow update: if isAuthenticated() && isValidBike(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
     }
     
     match /todos/{todoId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidTodo(request.resource.data);
+      allow update: if isAuthenticated() && isValidTodo(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
     }
     
     match /logs/{logId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidLog(request.resource.data);
+      allow update: if isAuthenticated() && isValidLog(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
     }
   }
 }

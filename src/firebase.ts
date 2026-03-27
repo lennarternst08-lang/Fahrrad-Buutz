@@ -10,9 +10,18 @@ export const googleProvider = new GoogleAuthProvider();
 
 export const signInWithGoogle = async () => {
   try {
-    await signInWithPopup(auth, googleProvider);
-  } catch (error) {
-    console.error("Error signing in with Google", error);
+    console.log("Starting Google Sign-In...");
+    const result = await signInWithPopup(auth, googleProvider);
+    console.log("Sign-In successful:", result.user.email);
+  } catch (error: any) {
+    console.error("Error signing in with Google:", error.code, error.message);
+    if (error.code === 'auth/popup-blocked') {
+      alert("Popup wurde blockiert. Bitte erlaube Popups für diese Seite.");
+    } else if (error.code === 'auth/operation-not-allowed') {
+      alert("Google-Anmeldung ist in Firebase noch nicht aktiviert. Bitte kontaktiere den Support.");
+    } else {
+      alert("Fehler bei der Anmeldung: " + error.message);
+    }
   }
 };
 
