@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "Expense": {
+      "title": "Expense",
+      "description": "An expense related to a bike",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "description", "amount", "date"]
+    },
+    "ChecklistItem": {
+      "title": "ChecklistItem",
+      "description": "A checklist item for a bike",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "completed": { "type": "boolean" }
+      },
+      "required": ["id", "text", "completed"]
+    },
+    "Bike": {
+      "title": "Bike",
+      "description": "A bike project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["Zu reparieren", "Inseriert", "Verkauft", "Infrastruktur"] },
+        "purchasePrice": { "type": "number" },
+        "purchaseDate": { "type": "string" },
+        "sellingPrice": { "type": ["number", "null"] },
+        "saleDate": { "type": ["string", "null"] },
+        "targetSellingPrice": { "type": ["number", "null"] },
+        "timeSpentSeconds": { "type": "number" },
+        "startTime": { "type": "number" },
+        "lastModified": { "type": "number" },
+        "expenses": { "type": "array", "items": { "$ref": "#/entities/Expense" } },
+        "checklist": { "type": "array", "items": { "$ref": "#/entities/ChecklistItem" } },
+        "notes": { "type": "string" },
+        "photos": { "type": "array", "items": { "type": "string" } },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "status", "purchasePrice", "purchaseDate", "timeSpentSeconds", "lastModified", "expenses", "checklist", "notes", "photos", "userId"]
+    },
+    "DailyTodo": {
+      "title": "DailyTodo",
+      "description": "A daily todo item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "linkedBikeId": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "text", "completed", "userId"]
+    },
+    "Log": {
+      "title": "Log",
+      "description": "An activity log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "message": { "type": "string" },
+        "module": { "type": "string", "enum": ["tracking", "workshop", "stopwatch", "system"] },
+        "revertAction": { "type": "object" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "message", "module", "userId"]
+    }
+  },
+  "firestore": {
+    "/bikes/{bikeId}": {
+      "schema": { "$ref": "#/entities/Bike" },
+      "description": "User's bikes"
+    },
+    "/todos/{todoId}": {
+      "schema": { "$ref": "#/entities/DailyTodo" },
+      "description": "User's daily todos"
+    },
+    "/logs/{logId}": {
+      "schema": { "$ref": "#/entities/Log" },
+      "description": "User's activity logs"
+    }
+  }
+}

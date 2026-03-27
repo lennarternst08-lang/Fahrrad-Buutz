@@ -3,7 +3,61 @@ import { TrackingModule } from './components/TrackingModule';
 import { WorkshopModule } from './components/WorkshopModule';
 import { DailyTodoModule } from './components/DailyTodoModule';
 import { Bike, DailyTodo, Log } from './types';
-import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X } from 'lucide-react';
+import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X, LogIn, LogOut, RotateCcw } from 'lucide-react';
+import { auth, db, signInWithGoogle, logout } from './firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string;
+    email?: string | null;
+    emailVerified?: boolean;
+    isAnonymous?: boolean;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // Mock Data
 const initialBikes: Bike[] = [
@@ -602,7 +656,10 @@ export default function App() {
     const saved = localStorage.getItem('flipbike_bikes');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
       } catch (e) {
         console.error('Failed to parse bikes from local storage', e);
       }
@@ -640,30 +697,149 @@ export default function App() {
 
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [logFilter, setLogFilter] = useState<'all' | 'tracking' | 'workshop' | 'stopwatch' | 'system'>('all');
+  const [logSortOrder, setLogSortOrder] = useState<'desc' | 'asc'>('desc');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Save to local storage whenever state changes
-  useEffect(() => {
-    localStorage.setItem('flipbike_bikes', JSON.stringify(bikes));
-  }, [bikes]);
-
-  useEffect(() => {
-    localStorage.setItem('flipbike_todos', JSON.stringify(dailyTodos));
-  }, [dailyTodos]);
+  const [user, setUser] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (activeWorkshopBikeId) {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+      if (!currentUser) setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const migrateData = async () => {
+      if (!isAuthReady || !user) return;
+
+      try {
+        const q = query(collection(db, 'bikes'), where('userId', '==', user.uid));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+          console.log('Firestore is empty, migrating local data...');
+          // Migrate bikes
+          const savedBikes = localStorage.getItem('flipbike_bikes');
+          let bikesToMigrate = savedBikes ? JSON.parse(savedBikes) : initialBikes;
+          
+          // If local storage is empty or just has initial bikes, ensure we have the full initial set
+          if (!bikesToMigrate || bikesToMigrate.length === 0) {
+            bikesToMigrate = initialBikes;
+          }
+
+          for (const bike of bikesToMigrate) {
+            await setDoc(doc(db, 'bikes', bike.id), { ...bike, userId: user.uid });
+          }
+
+          // Migrate todos
+          const savedTodos = localStorage.getItem('flipbike_todos');
+          if (savedTodos) {
+            const todosToMigrate = JSON.parse(savedTodos);
+            for (const todo of todosToMigrate) {
+              await setDoc(doc(db, 'todos', todo.id), { ...todo, userId: user.uid });
+            }
+          }
+          
+          // Migrate logs
+          const savedLogs = localStorage.getItem('flipbike_logs');
+          if (savedLogs) {
+            const logsToMigrate = JSON.parse(savedLogs);
+            for (const log of logsToMigrate) {
+              await setDoc(doc(db, 'logs', log.id), { ...log, userId: user.uid });
+            }
+          }
+          console.log('Migration complete.');
+        }
+      } catch (error) {
+        console.error('Migration failed:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    migrateData();
+  }, [user, isAuthReady]);
+
+  useEffect(() => {
+    if (!isAuthReady || !user) return;
+
+    const qBikes = query(collection(db, 'bikes'), where('userId', '==', user.uid));
+    const unsubBikes = onSnapshot(qBikes, (snapshot) => {
+      const fetchedBikes = snapshot.docs.map(doc => doc.data() as Bike);
+      setBikes(fetchedBikes);
+      setIsLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'bikes');
+      setIsLoading(false);
+    });
+
+    const qTodos = query(collection(db, 'todos'), where('userId', '==', user.uid));
+    const unsubTodos = onSnapshot(qTodos, (snapshot) => {
+      const fetchedTodos = snapshot.docs.map(doc => doc.data() as DailyTodo);
+      setDailyTodos(fetchedTodos);
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'todos'));
+
+    const qLogs = query(collection(db, 'logs'), where('userId', '==', user.uid));
+    const unsubLogs = onSnapshot(qLogs, (snapshot) => {
+      const fetchedLogs = snapshot.docs.map(doc => doc.data() as Log);
+      setLogs(fetchedLogs.sort((a, b) => b.timestamp - a.timestamp));
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'logs'));
+
+    return () => {
+      unsubBikes();
+      unsubTodos();
+      unsubLogs();
+    };
+  }, [user, isAuthReady]);
+
+  // Save to local storage whenever state changes (fallback)
+  useEffect(() => {
+    if (!isLoading) {
+      localStorage.setItem('flipbike_bikes', JSON.stringify(bikes));
+    }
+  }, [bikes, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      localStorage.setItem('flipbike_todos', JSON.stringify(dailyTodos));
+    }
+  }, [dailyTodos, isLoading]);
+
+  useEffect(() => {
+    if (activeWorkshopBikeId && !isLoading) {
       localStorage.setItem('flipbike_active_workshop_id', activeWorkshopBikeId);
-    } else {
+    } else if (!isLoading) {
       localStorage.removeItem('flipbike_active_workshop_id');
     }
-  }, [activeWorkshopBikeId]);
+  }, [activeWorkshopBikeId, isLoading]);
 
   useEffect(() => {
-    localStorage.setItem('flipbike_logs', JSON.stringify(logs));
-  }, [logs]);
+    if (!isLoading) {
+      localStorage.setItem('flipbike_logs', JSON.stringify(logs));
+    }
+  }, [logs, isLoading]);
 
-  const addLog = useCallback((message: string, revertAction?: Log['revertAction']) => {
-    setLogs(prev => [{ id: Math.random().toString(36).substr(2, 9), timestamp: Date.now(), message, revertAction }, ...prev].slice(0, 200));
+  const addLog = useCallback((message: string, module: Log['module'] = 'system', revertAction?: Log['revertAction']) => {
+    const newLog: Log = {
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: Date.now(),
+      message,
+      module,
+      revertAction,
+      userId: auth.currentUser?.uid
+    };
+    
+    if (auth.currentUser) {
+      setDoc(doc(db, 'logs', newLog.id), newLog).catch(e => handleFirestoreError(e, OperationType.CREATE, 'logs'));
+    } else {
+      setLogs(prev => [newLog, ...prev].slice(0, 1000));
+    }
   }, []);
 
   const updateBike = useCallback((id: string, updates: Partial<Bike>) => {
@@ -672,6 +848,7 @@ export default function App() {
       const oldValues: Partial<Bike> = {};
       let shouldLog = false;
       let message = '';
+      let module: Log['module'] = 'tracking';
 
       if (updates.status && updates.status !== bike.status) {
         oldValues.status = bike.status;
@@ -681,21 +858,56 @@ export default function App() {
         oldValues.name = bike.name;
         message = `Fahrrad umbenannt: "${bike.name}" -> "${updates.name}"`;
         shouldLog = true;
+      } else if (updates.purchasePrice !== undefined && updates.purchasePrice !== bike.purchasePrice) {
+        oldValues.purchasePrice = bike.purchasePrice;
+        message = `Einkaufspreis geändert für "${bike.name}": ${bike.purchasePrice} -> ${updates.purchasePrice}`;
+        shouldLog = true;
+      } else if (updates.sellingPrice !== undefined && updates.sellingPrice !== bike.sellingPrice) {
+        oldValues.sellingPrice = bike.sellingPrice;
+        message = `Verkaufspreis geändert für "${bike.name}": ${bike.sellingPrice} -> ${updates.sellingPrice}`;
+        shouldLog = true;
+      } else if (updates.expenses && updates.expenses.length !== bike.expenses.length) {
+        oldValues.expenses = bike.expenses;
+        message = `Ausgaben geändert für "${bike.name}"`;
+        shouldLog = true;
+        module = 'workshop';
+      } else if (updates.checklist && updates.checklist.length !== bike.checklist.length) {
+        oldValues.checklist = bike.checklist;
+        message = `Checkliste geändert für "${bike.name}"`;
+        shouldLog = true;
+        module = 'workshop';
+      } else if (updates.notes !== undefined && updates.notes !== bike.notes) {
+        oldValues.notes = bike.notes;
+        message = `Notizen geändert für "${bike.name}"`;
+        shouldLog = true;
+        module = 'workshop';
       }
 
       if (shouldLog) {
-        addLog(message, { type: 'update', data: { id, oldValues } });
+        addLog(message, module, { type: 'update', data: { id, oldValues } });
+      }
+      
+      const updatedBike = { ...bike, ...updates, lastModified: Date.now() };
+      if (auth.currentUser) {
+        setDoc(doc(db, 'bikes', id), updatedBike).catch(e => handleFirestoreError(e, OperationType.UPDATE, 'bikes'));
+      } else {
+        setBikes((prev) => prev.map((b) => (b.id === id ? updatedBike : b)));
       }
     }
-    setBikes((prev) => prev.map((b) => (b.id === id ? { ...b, ...updates, lastModified: Date.now() } : b)));
   }, [addLog, bikes]);
 
   const deleteBike = useCallback((id: string) => {
     const bike = bikes.find(b => b.id === id);
     if (bike) {
-      addLog(`Fahrrad gelöscht: "${bike.name}"`, { type: 'delete', data: { ...bike } });
+      addLog(`Fahrrad gelöscht: "${bike.name}"`, 'tracking', { type: 'delete', data: { ...bike } });
     }
-    setBikes((prev) => prev.filter((b) => b.id !== id));
+    
+    if (auth.currentUser) {
+      deleteDoc(doc(db, 'bikes', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'bikes'));
+    } else {
+      setBikes((prev) => prev.filter((b) => b.id !== id));
+    }
+    
     if (activeWorkshopBikeId === id) {
       setActiveWorkshopBikeId(null);
     }
@@ -717,10 +929,61 @@ export default function App() {
       checklist: [],
       notes: newBikeData.notes || '',
       photos: [],
+      userId: auth.currentUser?.uid
     };
-    setBikes([newBike, ...bikes]);
-    addLog(`Fahrrad hinzugefügt: "${newBike.name}"`, { type: 'add', data: newBike.id });
-  }, [addLog, bikes]);
+    
+    if (auth.currentUser) {
+      setDoc(doc(db, 'bikes', newBike.id), newBike).catch(e => handleFirestoreError(e, OperationType.CREATE, 'bikes'));
+    } else {
+      setBikes(prev => [newBike, ...prev]);
+    }
+    addLog(`Fahrrad hinzugefügt: "${newBike.name}"`, 'tracking', { type: 'add', data: newBike.id });
+  }, [addLog]);
+
+  const addTodo = useCallback((text: string, linkedBikeId?: string) => {
+    const newTodo: DailyTodo = {
+      id: Math.random().toString(36).substr(2, 9),
+      text,
+      completed: false,
+      linkedBikeId,
+      userId: auth.currentUser?.uid
+    };
+    
+    if (auth.currentUser) {
+      setDoc(doc(db, 'todos', newTodo.id), newTodo).catch(e => handleFirestoreError(e, OperationType.CREATE, 'todos'));
+    } else {
+      setDailyTodos(prev => [...prev, newTodo]);
+    }
+    addLog(`To-Do hinzugefügt: "${newTodo.text}"`, 'system');
+  }, [addLog]);
+
+  const toggleTodo = useCallback((id: string) => {
+    const todo = dailyTodos.find(t => t.id === id);
+    if (!todo) return;
+    
+    const newStatus = !todo.completed;
+    const updatedTodo = { ...todo, completed: newStatus };
+    
+    if (auth.currentUser) {
+      setDoc(doc(db, 'todos', id), updatedTodo).catch(e => handleFirestoreError(e, OperationType.UPDATE, 'todos'));
+    } else {
+      setDailyTodos(prev => prev.map(t => t.id === id ? updatedTodo : t));
+    }
+    addLog(`To-Do "${todo.text}" als ${newStatus ? 'erledigt' : 'offen'} markiert`, 'system');
+  }, [addLog, dailyTodos]);
+
+  const deleteTodo = useCallback((id: string) => {
+    const todo = dailyTodos.find(t => t.id === id);
+    if (todo) {
+      addLog(`To-Do gelöscht: "${todo.text}"`, 'system');
+    }
+    
+    if (auth.currentUser) {
+      deleteDoc(doc(db, 'todos', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'todos'));
+    } else {
+      setDailyTodos(prev => prev.filter(t => t.id !== id));
+    }
+  }, [addLog, dailyTodos]);
 
   const revertLogAction = (logId: string) => {
     const log = logs.find(l => l.id === logId);
@@ -730,17 +993,37 @@ export default function App() {
 
     if (type === 'add') {
       // Revert add: delete the bike
-      setBikes(prev => prev.filter(b => b.id !== data));
+      if (auth.currentUser) {
+        deleteDoc(doc(db, 'bikes', data)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'bikes'));
+      } else {
+        setBikes(prev => prev.filter(b => b.id !== data));
+      }
     } else if (type === 'delete') {
       // Revert delete: restore the bike
-      setBikes(prev => [data, ...prev]);
+      if (auth.currentUser) {
+        setDoc(doc(db, 'bikes', data.id), { ...data, userId: auth.currentUser.uid }).catch(e => handleFirestoreError(e, OperationType.CREATE, 'bikes'));
+      } else {
+        setBikes(prev => [data, ...prev]);
+      }
     } else if (type === 'update') {
       // Revert update: restore specific fields
-      setBikes(prev => prev.map(b => b.id === data.id ? { ...b, ...data.oldValues } : b));
+      const bike = bikes.find(b => b.id === data.id);
+      if (bike) {
+        const updatedBike = { ...bike, ...data.oldValues };
+        if (auth.currentUser) {
+          setDoc(doc(db, 'bikes', data.id), updatedBike).catch(e => handleFirestoreError(e, OperationType.UPDATE, 'bikes'));
+        } else {
+          setBikes(prev => prev.map(b => b.id === data.id ? updatedBike : b));
+        }
+      }
     }
 
     // Remove the log entry or mark it as reverted
-    setLogs(prev => prev.filter(l => l.id !== logId));
+    if (auth.currentUser) {
+      deleteDoc(doc(db, 'logs', logId)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'logs'));
+    } else {
+      setLogs(prev => prev.filter(l => l.id !== logId));
+    }
   };
 
   const navigateToWorkshopBike = (bikeId: string) => {
@@ -795,17 +1078,113 @@ export default function App() {
     setIsProfileMenuOpen(false);
   };
 
+  const exportBackup = () => {
+    const backupData = {
+      bikes,
+      dailyTodos,
+      logs,
+      activeWorkshopBikeId,
+      timestamp: Date.now()
+    };
+    const jsonContent = JSON.stringify(backupData, null, 2);
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `flipbike_backup_${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setIsProfileMenuOpen(false);
+    addLog('Manuelles Backup erstellt', 'system');
+  };
+
+  const restoreDemoData = async () => {
+    if (window.confirm('Möchtest du die Demo-Daten wiederherstellen? Dies wird deine aktuellen Daten überschreiben.')) {
+      if (user) {
+        try {
+          // Upload initial bikes to Firestore
+          for (const bike of initialBikes) {
+            await setDoc(doc(db, 'bikes', bike.id), { ...bike, userId: user.uid });
+          }
+          // Optionally clear other collections if needed, but for now just restore bikes
+          addLog('Demo-Daten in Cloud wiederhergestellt', 'system');
+        } catch (error) {
+          console.error('Fehler beim Wiederherstellen der Demo-Daten in der Cloud', error);
+        }
+      } else {
+        setBikes(initialBikes);
+        setDailyTodos([]);
+        setLogs([]);
+        addLog('Demo-Daten lokal wiederhergestellt', 'system');
+      }
+      setIsProfileMenuOpen(false);
+    }
+  };
+
+  const importBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const content = e.target?.result as string;
+        const backupData = JSON.parse(content);
+        
+        if (user) {
+          // Upload to Firestore
+          if (backupData.bikes) {
+            for (const bike of backupData.bikes) {
+              await setDoc(doc(db, 'bikes', bike.id), { ...bike, userId: user.uid });
+            }
+          }
+          if (backupData.dailyTodos) {
+            for (const todo of backupData.dailyTodos) {
+              await setDoc(doc(db, 'todos', todo.id), { ...todo, userId: user.uid });
+            }
+          }
+          if (backupData.logs) {
+            for (const log of backupData.logs) {
+              await setDoc(doc(db, 'logs', log.id), { ...log, userId: user.uid });
+            }
+          }
+        } else {
+          if (backupData.bikes) setBikes(backupData.bikes);
+          if (backupData.dailyTodos) setDailyTodos(backupData.dailyTodos);
+          if (backupData.logs) setLogs(backupData.logs);
+          if (backupData.activeWorkshopBikeId !== undefined) setActiveWorkshopBikeId(backupData.activeWorkshopBikeId);
+        }
+        
+        addLog('Backup erfolgreich wiederhergestellt', 'system');
+        alert('Backup erfolgreich wiederhergestellt!');
+      } catch (error) {
+        console.error('Fehler beim Importieren des Backups', error);
+        alert('Fehler beim Importieren des Backups. Die Datei ist möglicherweise beschädigt.');
+      }
+    };
+    reader.readAsText(file);
+    setIsProfileMenuOpen(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const filteredLogs = logs
+    .filter(log => logFilter === 'all' || log.module === logFilter)
+    .sort((a, b) => logSortOrder === 'desc' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-orange-500/30">
-      {/* Top Navigation (Desktop) */}
-      <nav className="hidden md:flex items-center justify-between px-8 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
+      {/* Top Navigation */}
+      <nav className="flex items-center justify-between px-4 md:px-8 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center space-x-2">
           <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
             <Wrench className="w-5 h-5 text-white" />
           </div>
           <span className="font-bold text-xl tracking-tight text-slate-100">Flip<span className="text-orange-500">Bike</span></span>
         </div>
-        <div className="flex space-x-1 bg-slate-800/50 p-1 rounded-lg border border-slate-700/50">
+        
+        {/* Desktop Tabs */}
+        <div className="hidden md:flex space-x-1 bg-slate-800/50 p-1 rounded-lg border border-slate-700/50">
           <button
             onClick={() => handleTabChange('tracking')}
             className={`flex items-center px-6 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
@@ -840,13 +1219,29 @@ export default function App() {
             DAILY TO-DO
           </button>
         </div>
-        <div className="relative">
-          <button 
-            onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-            className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 hover:bg-slate-700 transition-colors"
+
+        <div className="flex items-center space-x-3">
+          {/* Mobile Daily Button */}
+          <button
+            onClick={() => handleTabChange('daily')}
+            className={`md:hidden p-2 rounded-lg transition-colors ${
+              activeTab === 'daily' ? 'bg-emerald-500/20 text-emerald-500' : 'text-slate-400 hover:bg-slate-800'
+            }`}
           >
-            ME
+            <CheckSquare className="w-5 h-5" />
           </button>
+
+          <div className="relative">
+            <button 
+              onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+              className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 hover:bg-slate-700 transition-colors overflow-hidden"
+            >
+              {user?.photoURL ? (
+                <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-4 h-4" />
+              )}
+            </button>
           
           {isProfileMenuOpen && (
             <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-lg shadow-xl z-50 overflow-hidden">
@@ -872,64 +1267,55 @@ export default function App() {
                   <Image className="w-4 h-4 mr-2" />
                   Diagramme herunterladen
                 </button>
+                <div className="border-t border-slate-800 my-1"></div>
+                <button 
+                  onClick={exportBackup}
+                  className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Backup erstellen (JSON)
+                </button>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  Backup wiederherstellen
+                </button>
+                <button 
+                  onClick={() => { restoreDemoData(); setIsProfileMenuOpen(false); }}
+                  className="w-full flex items-center px-3 py-2 text-sm text-orange-400 hover:bg-slate-800 hover:text-orange-300 rounded-md transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Demo-Daten wiederherstellen
+                </button>
+                <div className="border-t border-slate-800 my-1"></div>
+                {user ? (
+                  <button 
+                    onClick={() => { logout(); setIsProfileMenuOpen(false); }}
+                    className="w-full flex items-center px-3 py-2 text-sm text-red-400 hover:bg-slate-800 hover:text-red-300 rounded-md transition-colors"
+                  >
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Abmelden
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => { signInWithGoogle(); setIsProfileMenuOpen(false); }}
+                    className="w-full flex items-center px-3 py-2 text-sm text-emerald-400 hover:bg-slate-800 hover:text-emerald-300 rounded-md transition-colors"
+                  >
+                    <LogIn className="w-4 h-4 mr-2" />
+                    Mit Google anmelden
+                  </button>
+                )}
               </div>
             </div>
           )}
         </div>
-      </nav>
+      </div>
+    </nav>
 
       {/* Main Content */}
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 md:py-8 md:pb-8">
-        {/* Mobile Header */}
-        <div className="md:hidden flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
-              <Wrench className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-bold text-xl tracking-tight text-slate-100">Flip<span className="text-orange-500">Bike</span></span>
-          </div>
-          <button
-            onClick={() => handleTabChange('tracking')}
-            className={`p-2 rounded-lg ${activeTab === 'tracking' ? 'bg-slate-700 text-white' : 'bg-slate-800 text-slate-400'}`}
-          >
-            <BarChart3 className="w-5 h-5" />
-          </button>
-          <div className="relative">
-            <button 
-              onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-              className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 hover:bg-slate-700 transition-colors"
-            >
-              ME
-            </button>
-            {isProfileMenuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-lg shadow-xl z-50 overflow-hidden">
-                <div className="p-2 space-y-1">
-                  <button 
-                    onClick={() => { setIsLogsModalOpen(true); setIsProfileMenuOpen(false); }}
-                    className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    Aktivitäts-Logs
-                  </button>
-                  <button 
-                    onClick={exportCSV}
-                    className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Als CSV exportieren
-                  </button>
-                  <button 
-                    onClick={downloadCharts}
-                    className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
-                  >
-                    <Image className="w-4 h-4 mr-2" />
-                    Diagramme herunterladen
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
 
         {/* Tab Content */}
         <div className={`animate-in fade-in duration-500 ${activeTab === 'tracking' && trackingScrollPos > 0 ? '' : 'slide-in-from-bottom-4'}`}>
@@ -946,6 +1332,7 @@ export default function App() {
               initialScrollPos={trackingScrollPos}
               isTiedCapitalExpanded={isTiedCapitalExpanded}
               setIsTiedCapitalExpanded={setIsTiedCapitalExpanded}
+              addLog={addLog}
             />
           ) : activeTab === 'workshop' ? (
             <WorkshopModule 
@@ -953,14 +1340,18 @@ export default function App() {
               updateBike={updateBike} 
               activeBikeId={activeWorkshopBikeId}
               setActiveBikeId={setActiveWorkshopBikeId}
+              addLog={addLog}
             />
           ) : (
             <DailyTodoModule 
               todos={dailyTodos} 
-              setTodos={setDailyTodos} 
+              addTodo={addTodo}
+              toggleTodo={toggleTodo}
+              deleteTodo={deleteTodo}
               bikes={bikes} 
               onNavigateBack={() => handleTabChange('workshop')}
               onNavigateToBike={navigateToWorkshopBike}
+              addLog={addLog}
             />
           )}
         </div>
@@ -982,17 +1373,49 @@ export default function App() {
                 <X className="w-5 h-5" />
               </button>
             </div>
+            <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row gap-4 justify-between items-center">
+              <div className="flex items-center space-x-2 w-full sm:w-auto">
+                <span className="text-sm text-slate-400">Filter:</span>
+                <select 
+                  className="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-md focus:ring-orange-500 focus:border-orange-500 block p-2"
+                  value={logFilter}
+                  onChange={(e) => setLogFilter(e.target.value as any)}
+                >
+                  <option value="all">Alle</option>
+                  <option value="tracking">Tracking</option>
+                  <option value="workshop">Werkstatt</option>
+                  <option value="stopwatch">Stoppuhr</option>
+                  <option value="system">System</option>
+                </select>
+              </div>
+              <div className="flex items-center space-x-2 w-full sm:w-auto">
+                <span className="text-sm text-slate-400">Sortierung:</span>
+                <select 
+                  className="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-md focus:ring-orange-500 focus:border-orange-500 block p-2"
+                  value={logSortOrder}
+                  onChange={(e) => setLogSortOrder(e.target.value as any)}
+                >
+                  <option value="desc">Neueste zuerst</option>
+                  <option value="asc">Älteste zuerst</option>
+                </select>
+              </div>
+            </div>
             <div className="p-4 overflow-y-auto flex-1">
-              {logs.length === 0 ? (
+              {filteredLogs.length === 0 ? (
                 <div className="text-center py-8 text-slate-500">
                   Keine Logs vorhanden.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {logs.map(log => (
+                  {filteredLogs.map(log => (
                     <div key={log.id} className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
-                      <div className="text-xs text-slate-500 mb-1">
-                        {new Date(log.timestamp).toLocaleString('de-DE')}
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="text-xs text-slate-500">
+                          {new Date(log.timestamp).toLocaleString('de-DE')}
+                        </div>
+                        <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 bg-slate-800 px-2 py-0.5 rounded">
+                          {log.module}
+                        </div>
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="text-sm text-slate-300">
@@ -1039,6 +1462,14 @@ export default function App() {
           </button>
         </div>
       </nav>
+
+      <input 
+        type="file" 
+        accept=".json" 
+        ref={fileInputRef} 
+        style={{ display: 'none' }} 
+        onChange={importBackup} 
+      />
     </div>
   );
 }

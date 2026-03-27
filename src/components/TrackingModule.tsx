@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { formatCurrency } from '../lib/utils';
-import { TrendingUp, Clock, Wallet, Plus, Search, Filter, ArrowUpDown, ArrowUp, ArrowDown, MoreVertical, Trash2, Edit2, Star, ChevronDown, ChevronUp } from 'lucide-react';
+import { TrendingUp, Clock, Wallet, Plus, Search, Filter, ArrowUpDown, ArrowUp, ArrowDown, MoreVertical, Trash2, Edit2, Star, ChevronDown, ChevronUp, X, Check } from 'lucide-react';
 import { 
   format, subDays, subWeeks, subMonths, subYears, 
   isSameDay, isSameWeek, isSameMonth, isSameYear, 
@@ -72,6 +72,7 @@ interface TrackingModuleProps {
   initialScrollPos?: number;
   isTiedCapitalExpanded: boolean;
   setIsTiedCapitalExpanded: (expanded: boolean) => void;
+  addLog: (message: string, module: 'tracking' | 'workshop' | 'stopwatch' | 'system', revertAction?: any) => void;
 }
 
 export function TrackingModule({ 
@@ -82,7 +83,8 @@ export function TrackingModule({
   onNavigateToWorkshop, 
   initialScrollPos,
   isTiedCapitalExpanded,
-  setIsTiedCapitalExpanded
+  setIsTiedCapitalExpanded,
+  addLog
 }: TrackingModuleProps) {
   const [filterStatus, setFilterStatus] = useState<BikeStatus | 'Alle'>('Alle');
   const [searchQuery, setSearchQuery] = useState('');
@@ -99,12 +101,8 @@ export function TrackingModule({
   }, [tableViewMode]);
 
   type SortField = 'name' | 'status' | 'purchaseDate' | 'purchasePrice' | 'expenses' | 'timeSpentSeconds' | 'targetSellingPrice' | 'saleDate' | 'sellingPrice' | 'hourlyWage' | 'profit' | 'velocity';
-  const [sortField, setSortField] = useState<SortField>(() => {
-    return window.innerWidth < 768 ? 'status' : 'purchaseDate';
-  });
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(() => {
-    return window.innerWidth < 768 ? 'asc' : 'desc';
-  });
+  const [sortField, setSortField] = useState<SortField>('status');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -123,6 +121,34 @@ export function TrackingModule({
   });
 
   const [isReady, setIsReady] = useState(!initialScrollPos);
+
+  const [salePromptBikeId, setSalePromptBikeId] = useState<string | null>(null);
+  const [salePromptPrice, setSalePromptPrice] = useState<string>('');
+  const [salePromptDate, setSalePromptDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
+  const handleStatusChange = (bikeId: string, newStatus: BikeStatus) => {
+    const bike = bikes.find(b => b.id === bikeId);
+    if (!bike) return;
+
+    if (newStatus === 'Verkauft' && bike.status !== 'Verkauft') {
+      setSalePromptBikeId(bikeId);
+      setSalePromptPrice(bike.targetSellingPrice?.toString() || '');
+      setSalePromptDate(new Date().toISOString().split('T')[0]);
+    } else {
+      updateBike(bikeId, { status: newStatus });
+    }
+  };
+
+  const confirmSale = () => {
+    if (salePromptBikeId) {
+      updateBike(salePromptBikeId, {
+        status: 'Verkauft',
+        sellingPrice: parseFloat(salePromptPrice) || 0,
+        saleDate: salePromptDate
+      });
+      setSalePromptBikeId(null);
+    }
+  };
 
   React.useLayoutEffect(() => {
     if (initialScrollPos) {
@@ -428,8 +454,8 @@ export function TrackingModule({
   return (
     <div className={`space-y-6 pb-20 md:pb-0 transition-opacity ${isReady ? 'duration-300 opacity-100' : 'duration-0 opacity-0'}`}>
       {/* Inventory List (Moved to top) */}
-      <Card className="flex flex-col">
-        <CardHeader className="flex flex-col md:flex-row md:items-center justify-between space-y-4 md:space-y-0 pb-4 sticky top-0 z-30 bg-slate-900 border-b border-slate-800 rounded-t-xl">
+      <Card className="flex flex-col overflow-hidden">
+        <CardHeader className="flex flex-col md:flex-row md:items-center justify-between space-y-4 md:space-y-0 pb-4 bg-slate-900 border-b border-slate-800 rounded-t-xl">
           <div className="flex items-center space-x-4">
             <CardTitle className="text-xl">Inventar</CardTitle>
             <Button size="sm" onClick={() => setIsAddModalOpen(true)} className="h-8">
@@ -473,23 +499,23 @@ export function TrackingModule({
             </select>
           </div>
         </CardHeader>
-        <CardContent className="pt-4">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left text-slate-300 min-w-[800px]">
-              <thead className="text-xs text-slate-400 uppercase bg-slate-800">
+        <CardContent className="pt-0 px-0">
+          <div className="overflow-auto max-h-[70vh] md:max-h-none">
+            <table className="w-full text-sm text-left text-slate-300 min-w-[800px] border-separate border-spacing-0">
+              <thead className="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0 z-30">
                 <tr>
-                  <th className="px-2 py-3 rounded-tl-lg cursor-pointer hover:bg-slate-700/50 sticky left-0 z-20 bg-slate-800 border-r border-slate-700/50 max-w-[120px] md:max-w-none" onClick={() => handleSort('name')}>Fahrrad <SortIcon field="name" /></th>
-                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('status')}>Status <SortIcon field="status" /></th>
-                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('purchaseDate')}>Ankauf <SortIcon field="purchaseDate" /></th>
-                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('purchasePrice')}>EK (€) <SortIcon field="purchasePrice" /></th>
-                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('expenses')}>Material (€) <SortIcon field="expenses" /></th>}
-                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('timeSpentSeconds')}>Stunden <SortIcon field="timeSpentSeconds" /></th>}
-                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('targetSellingPrice')}>Ziel VK (€) <SortIcon field="targetSellingPrice" /></th>}
-                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('saleDate')}>Verkauf <SortIcon field="saleDate" /></th>
-                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('velocity')}>Dauer <SortIcon field="velocity" /></th>}
-                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('sellingPrice')}>VK (€) <SortIcon field="sellingPrice" /></th>
-                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('hourlyWage')}>Stundenlohn <SortIcon field="hourlyWage" /></th>}
-                  <th className="px-3 py-3 rounded-tr-lg cursor-pointer hover:bg-slate-700/50" onClick={() => handleSort('profit')}>Profit <SortIcon field="profit" /></th>
+                  <th className="px-2 py-3 cursor-pointer hover:bg-slate-700/50 sticky left-0 z-40 bg-slate-800 border-r border-slate-700/50 min-w-[140px]" onClick={() => handleSort('name')}>Fahrrad <SortIcon field="name" /></th>
+                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('status')}>Status <SortIcon field="status" /></th>
+                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('purchaseDate')}>Ankauf <SortIcon field="purchaseDate" /></th>
+                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('purchasePrice')}>EK (€) <SortIcon field="purchasePrice" /></th>
+                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('expenses')}>Material (€) <SortIcon field="expenses" /></th>}
+                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('timeSpentSeconds')}>Stunden <SortIcon field="timeSpentSeconds" /></th>}
+                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('targetSellingPrice')}>Ziel VK (€) <SortIcon field="targetSellingPrice" /></th>}
+                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('saleDate')}>Verkauf <SortIcon field="saleDate" /></th>
+                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('velocity')}>Dauer <SortIcon field="velocity" /></th>}
+                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('sellingPrice')}>VK (€) <SortIcon field="sellingPrice" /></th>
+                  {tableViewMode === 'expanded' && <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('hourlyWage')}>Stundenlohn <SortIcon field="hourlyWage" /></th>}
+                  <th className="px-3 py-3 cursor-pointer hover:bg-slate-700/50 border-b border-slate-700/50" onClick={() => handleSort('profit')}>Profit <SortIcon field="profit" /></th>
                 </tr>
               </thead>
               <tbody>
@@ -514,10 +540,10 @@ export function TrackingModule({
                         ? 'bg-yellow-500/5 hover:bg-yellow-500/10' 
                         : 'hover:bg-slate-800/30'
                     }`}>
-                      <td className={`px-2 py-2 sticky left-0 z-10 transition-colors border-r border-slate-700/50 max-w-[120px] md:max-w-none ${
+                      <td className={`px-2 py-2 sticky left-0 z-20 transition-colors border-r border-slate-700/50 min-w-[140px] ${
                         isBigWin 
-                          ? 'bg-slate-900 group-hover:bg-slate-800/80 shadow-[inset_4px_0_0_rgba(234,179,8,0.5)]' 
-                          : 'bg-slate-900 group-hover:bg-slate-800/80'
+                          ? 'bg-slate-900 group-hover:bg-slate-800 shadow-[inset_4px_0_0_rgba(234,179,8,0.5)]' 
+                          : 'bg-slate-900 group-hover:bg-slate-800'
                       }`}>
                         <div className="flex items-center space-x-1 relative w-full">
                           <button 
@@ -560,7 +586,7 @@ export function TrackingModule({
                       <td className="px-3 py-2">
                         <select
                           value={bike.status}
-                          onChange={(e) => updateBike(bike.id, { status: e.target.value as BikeStatus })}
+                          onChange={(e) => handleStatusChange(bike.id, e.target.value as BikeStatus)}
                           className={`h-8 px-2 rounded-md text-xs font-medium border-none focus:ring-2 focus:ring-orange-500 outline-none ${
                             bike.status === 'Zu reparieren' ? 'bg-red-500/20 text-red-400' :
                             bike.status === 'Inseriert' ? 'bg-blue-500/20 text-blue-400' :
@@ -863,6 +889,62 @@ export function TrackingModule({
         </div>
       </div>
 
+      {/* Sale Details Modal */}
+      {salePromptBikeId && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-800">
+              <h2 className="text-lg font-bold text-slate-100 flex items-center">
+                <TrendingUp className="w-5 h-5 mr-2 text-emerald-500" />
+                Verkaufsdetails
+              </h2>
+              <button 
+                onClick={() => setSalePromptBikeId(null)}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1">Verkaufspreis (€)</label>
+                <Input 
+                  type="number"
+                  value={salePromptPrice}
+                  onChange={(e) => setSalePromptPrice(e.target.value)}
+                  className="bg-slate-800 border-slate-700 text-slate-100"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1">Verkaufsdatum</label>
+                <Input 
+                  type="date"
+                  value={salePromptDate}
+                  onChange={(e) => setSalePromptDate(e.target.value)}
+                  className="bg-slate-800 border-slate-700 text-slate-100"
+                />
+              </div>
+              <div className="pt-4 flex space-x-3">
+                <Button 
+                  variant="outline" 
+                  className="flex-1 border-slate-700 text-slate-300 hover:bg-slate-800"
+                  onClick={() => setSalePromptBikeId(null)}
+                >
+                  Abbrechen
+                </Button>
+                <Button 
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white"
+                  onClick={confirmSale}
+                >
+                  <Check className="w-4 h-4 mr-2" /> Bestätigen
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Bike Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
@@ -994,7 +1076,11 @@ export function TrackingModule({
                 <Button 
                   onClick={() => {
                     const totalSeconds = (editHours * 3600) + (editMinutes * 60);
-                    updateBike(editTimeBikeId, { timeSpentSeconds: totalSeconds });
+                    const bike = bikes.find(b => b.id === editTimeBikeId);
+                    updateBike(editTimeBikeId, { 
+                      timeSpentSeconds: totalSeconds,
+                      ...(bike?.startTime ? { startTime: Date.now() } : {})
+                    });
                     setEditTimeBikeId(null);
                   }} 
                   className="bg-orange-500 hover:bg-orange-600 text-white"

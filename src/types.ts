@@ -23,12 +23,13 @@ export interface Bike {
   saleDate: string | null;
   targetSellingPrice: number | null;
   timeSpentSeconds: number;
-  startTime?: number; // For offline stopwatch tracking
+  startTime?: number | null; // For offline stopwatch tracking
   lastModified: number; // For sorting in workshop
   expenses: Expense[];
   checklist: ChecklistItem[];
   notes: string;
   photos: string[];
+  userId?: string;
 }
 
 export interface DailyTodo {
@@ -36,14 +37,17 @@ export interface DailyTodo {
   text: string;
   completed: boolean;
   linkedBikeId?: string;
+  userId?: string;
 }
 
 export interface Log {
   id: string;
   timestamp: number;
   message: string;
+  module: 'tracking' | 'workshop' | 'stopwatch' | 'system';
   revertAction?: {
     type: 'add' | 'delete' | 'update';
     data: any;
   };
+  userId?: string;
 }

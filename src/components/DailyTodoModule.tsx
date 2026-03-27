@@ -7,13 +7,16 @@ import { Plus, CheckCircle2, Circle, Trash2, ArrowLeft, Bike as BikeIcon } from 
 
 interface DailyTodoModuleProps {
   todos: DailyTodo[];
-  setTodos: React.Dispatch<React.SetStateAction<DailyTodo[]>>;
+  addTodo: (text: string, linkedBikeId?: string) => void;
+  toggleTodo: (id: string) => void;
+  deleteTodo: (id: string) => void;
   bikes: Bike[];
   onNavigateBack: () => void;
   onNavigateToBike: (bikeId: string) => void;
+  addLog: (message: string, module: 'tracking' | 'workshop' | 'stopwatch' | 'system', revertAction?: any) => void;
 }
 
-export function DailyTodoModule({ todos, setTodos, bikes, onNavigateBack, onNavigateToBike }: DailyTodoModuleProps) {
+export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes, onNavigateBack, onNavigateToBike, addLog }: DailyTodoModuleProps) {
   const [newTodoText, setNewTodoText] = useState('');
   const [showBikeSuggestions, setShowBikeSuggestions] = useState(false);
   const [selectedBikeId, setSelectedBikeId] = useState<string | undefined>(undefined);
@@ -23,26 +26,18 @@ export function DailyTodoModule({ todos, setTodos, bikes, onNavigateBack, onNavi
 
   const handleAddTodo = () => {
     if (!newTodoText.trim()) return;
-    
-    const newTodo: DailyTodo = {
-      id: Math.random().toString(36).substr(2, 9),
-      text: newTodoText,
-      completed: false,
-      linkedBikeId: selectedBikeId,
-    };
-    
-    setTodos([...todos, newTodo]);
+    addTodo(newTodoText, selectedBikeId);
     setNewTodoText('');
     setSelectedBikeId(undefined);
     setShowBikeSuggestions(false);
   };
 
-  const toggleTodo = (id: string) => {
-    setTodos(todos.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  const handleToggleTodo = (id: string) => {
+    toggleTodo(id);
   };
 
-  const deleteTodo = (id: string) => {
-    setTodos(todos.filter(t => t.id !== id));
+  const handleDeleteTodo = (id: string) => {
+    deleteTodo(id);
   };
 
   // Auto-suggest bike based on text input
@@ -144,7 +139,7 @@ export function DailyTodoModule({ todos, setTodos, bikes, onNavigateBack, onNavi
                   }`}
                 >
                   <div className="flex items-center space-x-3 flex-1">
-                    <button onClick={() => toggleTodo(todo.id)} className="text-slate-400 hover:text-orange-500 transition-colors">
+                    <button onClick={() => handleToggleTodo(todo.id)} className="text-slate-400 hover:text-orange-500 transition-colors">
                       {todo.completed ? <CheckCircle2 className="w-6 h-6 text-emerald-500" /> : <Circle className="w-6 h-6" />}
                     </button>
                     <div className="flex flex-col">
@@ -162,7 +157,7 @@ export function DailyTodoModule({ todos, setTodos, bikes, onNavigateBack, onNavi
                       )}
                     </div>
                   </div>
-                  <button onClick={() => deleteTodo(todo.id)} className="text-slate-500 hover:text-red-500 p-2">
+                  <button onClick={() => handleDeleteTodo(todo.id)} className="text-slate-500 hover:text-red-500 p-2">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

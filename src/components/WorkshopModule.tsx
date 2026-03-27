@@ -4,16 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { formatTime, formatCurrency } from '../lib/utils';
-import { Play, Pause, RotateCcw, Plus, Camera, CheckSquare, Wrench, Trash2, CheckCircle2, Circle, Undo2, Search } from 'lucide-react';
+import { Play, Pause, RotateCcw, Plus, Camera, CheckSquare, Wrench, Trash2, CheckCircle2, Circle, Undo2, Search, Eye, X } from 'lucide-react';
 
 interface WorkshopModuleProps {
   bikes: Bike[];
   updateBike: (id: string, updates: Partial<Bike>) => void;
   activeBikeId: string | null;
   setActiveBikeId: (id: string | null) => void;
+  addLog: (message: string, module: 'tracking' | 'workshop' | 'stopwatch' | 'system', revertAction?: any) => void;
 }
 
-export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeId }: WorkshopModuleProps) {
+export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeId, addLog }: WorkshopModuleProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const activeProjects = bikes
@@ -58,6 +59,9 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
   // Notes state
   const [notes, setNotes] = useState(activeBike?.notes || '');
 
+  // Photo preview state
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+
   // Sync time when active bike changes
   useEffect(() => {
     if (activeBike) {
@@ -85,7 +89,10 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
           const newTime = prev + 1;
           // Save to parent state every 30 seconds to prevent data loss
           if (newTime % 30 === 0 && activeBikeId) {
-            updateBike(activeBikeId, { timeSpentSeconds: newTime });
+            updateBike(activeBikeId, { 
+              timeSpentSeconds: newTime,
+              startTime: Date.now() 
+            });
           }
           return newTime;
         });
@@ -107,16 +114,21 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
       setTime((currentTime) => {
         updateBike(activeBike.id, { 
           timeSpentSeconds: currentTime,
-          startTime: undefined 
+          startTime: null 
         });
+        const elapsed = activeBike.startTime ? Math.floor((Date.now() - activeBike.startTime) / 1000) : 0;
+        const startStr = activeBike.startTime ? new Date(activeBike.startTime).toLocaleTimeString('de-DE') : 'unbekannt';
+        addLog(`Stoppuhr gestoppt für "${activeBike.name}". Gestartet um ${startStr}. Dauer: ${formatTime(elapsed)}.`, 'stopwatch');
         return currentTime;
       });
     } else {
       // Start timer
       setIsRunning(true);
+      const now = Date.now();
       updateBike(activeBike.id, {
-        startTime: Date.now()
+        startTime: now
       });
+      addLog(`Stoppuhr gestartet für "${activeBike.name}" um ${new Date(now).toLocaleTimeString('de-DE')}.`, 'stopwatch');
     }
   };
 
@@ -160,7 +172,10 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
     
     setTime((currentTime) => {
       const newTime = Math.max(0, currentTime + minutes * 60);
-      updateBike(activeBike.id, { timeSpentSeconds: newTime });
+      updateBike(activeBike.id, { 
+        timeSpentSeconds: newTime,
+        ...(isRunning ? { startTime: Date.now() } : {})
+      });
       return newTime;
     });
     setManualTime('');
@@ -196,21 +211,37 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activeBike || !e.target.files || e.target.files.length === 0) return;
     
-    const file = e.target.files[0];
-    const reader = new FileReader();
+    const files = Array.from(e.target.files) as File[];
+    const newPhotos: string[] = [];
+    let processedCount = 0;
+
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result as string;
+        newPhotos.push(base64String);
+        processedCount++;
+
+        if (processedCount === files.length) {
+          updateBike(activeBike.id, {
+            photos: [...(activeBike.photos || []), ...newPhotos]
+          });
+        }
+      };
+      reader.readAsDataURL(file);
+    });
     
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      updateBike(activeBike.id, {
-        photos: [...(activeBike.photos || []), base64String]
-      });
-    };
-    
-    reader.readAsDataURL(file);
     // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  const handleDeletePhoto = (index: number) => {
+    if (!activeBike) return;
+    const updatedPhotos = [...(activeBike.photos || [])];
+    updatedPhotos.splice(index, 1);
+    updateBike(activeBike.id, { photos: updatedPhotos });
   };
 
   if (!activeBike) {
@@ -278,7 +309,10 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
                   onClick={() => {
                     setTime((prev) => {
                       setLastResetTime(prev);
-                      updateBike(activeBike.id, { timeSpentSeconds: 0 });
+                      updateBike(activeBike.id, { 
+                        timeSpentSeconds: 0,
+                        ...(isRunning ? { startTime: Date.now() } : {})
+                      });
                       return 0;
                     });
                   }}
@@ -306,7 +340,10 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
                     className="w-14 h-14 rounded-full border-orange-500/50 hover:bg-orange-500/10 text-orange-400"
                     onClick={() => {
                       setTime(lastResetTime);
-                      updateBike(activeBike.id, { timeSpentSeconds: lastResetTime });
+                      updateBike(activeBike.id, { 
+                        timeSpentSeconds: lastResetTime,
+                        ...(isRunning ? { startTime: Date.now() } : {})
+                      });
                       setLastResetTime(null);
                     }}
                     title="Rückgängig machen"
@@ -464,28 +501,89 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
               <input 
                 type="file" 
                 accept="image/*" 
-                capture="environment" 
                 className="hidden" 
                 ref={fileInputRef}
                 onChange={handlePhotoUpload}
+                multiple
               />
-              <Button 
-                variant="outline" 
-                className="w-full mb-4 border-dashed border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Camera className="w-4 h-4 mr-2" />
-                Foto hinzufügen
-              </Button>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <Button 
+                  variant="outline" 
+                  className="border-dashed border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 h-24 flex-col gap-2"
+                  onClick={() => {
+                    if (fileInputRef.current) {
+                      fileInputRef.current.removeAttribute('capture');
+                      fileInputRef.current.click();
+                    }
+                  }}
+                >
+                  <Plus className="w-6 h-6" />
+                  <span className="text-xs">Upload</span>
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="border-dashed border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 h-24 flex-col gap-2"
+                  onClick={() => {
+                    if (fileInputRef.current) {
+                      fileInputRef.current.setAttribute('capture', 'environment');
+                      fileInputRef.current.click();
+                    }
+                  }}
+                >
+                  <Camera className="w-6 h-6" />
+                  <span className="text-xs">Kamera</span>
+                </Button>
+              </div>
+
               <div className="grid grid-cols-3 gap-2">
                 {activeBike.photos.map((url, i) => (
-                  <div key={i} className="aspect-square rounded-md bg-slate-800 overflow-hidden border border-slate-700">
-                    <img src={url} alt={`Bike photo ${i+1}`} className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" />
+                  <div key={i} className="group relative aspect-square rounded-md bg-slate-800 overflow-hidden border border-slate-700">
+                    <img 
+                      src={url} 
+                      alt={`Bike photo ${i+1}`} 
+                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity cursor-pointer" 
+                      onClick={() => setSelectedPhoto(url)}
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                      <button 
+                        onClick={() => setSelectedPhoto(url)}
+                        className="p-1.5 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeletePhoto(i)}
+                        className="p-1.5 bg-red-500/20 hover:bg-red-500/40 rounded-full text-red-400 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             </CardContent>
           </Card>
+
+          {/* Photo Preview Modal */}
+          {selectedPhoto && (
+            <div 
+              className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 md:p-8"
+              onClick={() => setSelectedPhoto(null)}
+            >
+              <button 
+                className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors z-[110]"
+                onClick={() => setSelectedPhoto(null)}
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <img 
+                src={selectedPhoto} 
+                alt="Vorschau" 
+                className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
 
           {/* Quick Stats (Small Footer) */}
           <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800 text-sm space-y-2">
