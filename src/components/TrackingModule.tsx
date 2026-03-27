@@ -88,6 +88,11 @@ export function TrackingModule({
 }: TrackingModuleProps) {
   const [filterStatus, setFilterStatus] = useState<BikeStatus | 'Alle'>('Alle');
   const [searchQuery, setSearchQuery] = useState('');
+  const [purchaseDateStart, setPurchaseDateStart] = useState<string>('');
+  const [purchaseDateEnd, setPurchaseDateEnd] = useState<string>('');
+  const [minSellingPrice, setMinSellingPrice] = useState<string>('');
+  const [maxSellingPrice, setMaxSellingPrice] = useState<string>('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [timeframe, setTimeframe] = useState<'day' | 'week' | 'month' | 'year'>('month');
   
   const [tableViewMode, setTableViewMode] = useState<'quick' | 'expanded'>(() => {
@@ -125,6 +130,8 @@ export function TrackingModule({
   const [salePromptBikeId, setSalePromptBikeId] = useState<string | null>(null);
   const [salePromptPrice, setSalePromptPrice] = useState<string>('');
   const [salePromptDate, setSalePromptDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
+  const [selectedPeriodIndex, setSelectedPeriodIndex] = useState<number | null>(null);
 
   const handleStatusChange = (bikeId: string, newStatus: BikeStatus) => {
     const bike = bikes.find(b => b.id === bikeId);
@@ -276,6 +283,50 @@ export function TrackingModule({
 
   const gewinnData = umsatzData.map((umsatz, i) => umsatz - investData[i]);
 
+  const periodDetails = periods.map(period => {
+    const bought: string[] = [];
+    const sold: string[] = [];
+    const workSessions: { bikeName: string, duration: number }[] = [];
+    const materialExpenses: { bikeName: string, desc: string, amount: number }[] = [];
+    let totalHours = 0;
+    let totalExpenses = 0;
+    
+    bikes.forEach(bike => {
+      if (bike.purchaseDate && isSamePeriod(parseISO(bike.purchaseDate), period, timeframe)) {
+        bought.push(bike.name);
+      }
+      if (bike.saleDate && isSamePeriod(parseISO(bike.saleDate), period, timeframe)) {
+        sold.push(bike.name);
+      }
+      
+      // Work logs
+      bike.workLogs?.forEach(log => {
+        if (isSamePeriod(parseISO(log.timestamp), period, timeframe)) {
+          totalHours += log.durationSeconds / 3600;
+          workSessions.push({ bikeName: bike.name, duration: log.durationSeconds });
+        }
+      });
+
+      // Expenses
+      bike.expenses.forEach(exp => {
+        if (exp.date && isSamePeriod(parseISO(exp.date), period, timeframe)) {
+          totalExpenses += exp.amount;
+          materialExpenses.push({ bikeName: bike.name, desc: exp.description, amount: exp.amount });
+        }
+      });
+    });
+    
+    return { 
+      label: formatPeriod(period, timeframe),
+      bought, 
+      sold, 
+      totalHours, 
+      totalExpenses, 
+      workSessions, 
+      materialExpenses 
+    };
+  });
+
   const gesamtGewinnData = periods.map(period => {
     const end = getEndOfPeriod(period, timeframe);
     let profit = 0;
@@ -323,7 +374,41 @@ export function TrackingModule({
         display: true,
         position: 'top' as const,
         labels: { color: '#cbd5e1', boxWidth: 12, padding: 10 }
-      } 
+      },
+      tooltip: {
+        backgroundColor: 'rgba(15, 23, 42, 0.9)',
+        titleColor: '#f1f5f9',
+        bodyColor: '#cbd5e1',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderWidth: 1,
+        padding: 12,
+        cornerRadius: 8,
+        callbacks: {
+          label: (context: any) => {
+            let label = context.dataset.label || '';
+            if (label) label += ': ';
+            if (context.parsed.y !== null) {
+              label += formatCurrency(context.parsed.y);
+            }
+            return label;
+          },
+          footer: (context: any) => {
+            const index = context[0].dataIndex;
+            const data = context[0].dataset.data;
+            if (index > 0) {
+              const diff = data[index] - data[index - 1];
+              const sign = diff >= 0 ? '+' : '';
+              return `Bilanz: ${sign}${formatCurrency(diff)}`;
+            }
+            return '';
+          }
+        }
+      }
+    },
+    onClick: (event: any, elements: any) => {
+      if (elements.length > 0) {
+        setSelectedPeriodIndex(elements[0].index);
+      }
     },
     scales: {
       y: { 
@@ -345,6 +430,59 @@ export function TrackingModule({
       tension: 0.1,
       fill: false,
     }]
+  };
+
+  const stundenlohnOptions = {
+    ...commonOptions,
+    plugins: {
+      ...commonOptions.plugins,
+      tooltip: {
+        ...commonOptions.plugins.tooltip,
+        callbacks: {
+          ...commonOptions.plugins.tooltip.callbacks,
+          label: (context: any) => {
+            let label = context.dataset.label || '';
+            if (label) label += ': ';
+            if (context.parsed.y !== null) {
+              label += `${context.parsed.y.toFixed(2)} €/h`;
+            }
+            return label;
+          },
+          footer: (context: any) => {
+            const index = context[0].dataIndex;
+            const details = periodDetails[index];
+            const lines = [];
+            if (details.bought.length > 0) lines.push(`Gekauft: ${details.bought.join(', ')}`);
+            if (details.sold.length > 0) lines.push(`Verkauft: ${details.sold.join(', ')}`);
+            if (details.totalHours > 0) lines.push(`Arbeitszeit: ${details.totalHours.toFixed(1)}h`);
+            return lines.length > 0 ? '\n' + lines.join('\n') : '';
+          }
+        }
+      }
+    }
+  };
+
+  const gewinnPeriodeOptions = {
+    ...commonOptions,
+    plugins: {
+      ...commonOptions.plugins,
+      tooltip: {
+        ...commonOptions.plugins.tooltip,
+        callbacks: {
+          ...commonOptions.plugins.tooltip.callbacks,
+          footer: (context: any) => {
+            const index = context[0].dataIndex;
+            const details = periodDetails[index];
+            const lines = [];
+            if (details.bought.length > 0) lines.push(`Gekauft: ${details.bought.join(', ')}`);
+            if (details.sold.length > 0) lines.push(`Verkauft: ${details.sold.join(', ')}`);
+            if (details.totalHours > 0) lines.push(`Arbeitszeit: ${details.totalHours.toFixed(1)}h`);
+            if (details.totalExpenses > 0) lines.push(`Material: ${formatCurrency(details.totalExpenses)}`);
+            return lines.length > 0 ? '\n' + lines.join('\n') : '';
+          }
+        }
+      }
+    }
   };
 
   const gesamtGewinnChartData = {
@@ -411,6 +549,24 @@ export function TrackingModule({
   const filteredBikes = bikes
     .filter(b => filterStatus === 'Alle' || b.status === filterStatus)
     .filter(b => b.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter(b => {
+      if (!purchaseDateStart) return true;
+      return new Date(b.purchaseDate) >= new Date(purchaseDateStart);
+    })
+    .filter(b => {
+      if (!purchaseDateEnd) return true;
+      return new Date(b.purchaseDate) <= new Date(purchaseDateEnd);
+    })
+    .filter(b => {
+      const price = b.sellingPrice || b.targetSellingPrice || 0;
+      if (!minSellingPrice) return true;
+      return price >= parseFloat(minSellingPrice);
+    })
+    .filter(b => {
+      const price = b.sellingPrice || b.targetSellingPrice || 0;
+      if (!maxSellingPrice) return true;
+      return price <= parseFloat(maxSellingPrice);
+    })
     .sort((a, b) => {
       let valA: any = 0;
       let valB: any = 0;
@@ -465,7 +621,15 @@ export function TrackingModule({
           <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
             <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2">
               <button
-                onClick={() => setTableViewMode('quick')}
+                onClick={() => {
+                  setTableViewMode('quick');
+                  setShowAdvancedFilters(false);
+                  setFilterStatus('Alle');
+                  setPurchaseDateStart('');
+                  setPurchaseDateEnd('');
+                  setMinSellingPrice('');
+                  setMaxSellingPrice('');
+                }}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${tableViewMode === 'quick' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-300'}`}
               >
                 Schnellansicht
@@ -486,19 +650,91 @@ export function TrackingModule({
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <select
-              className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-            >
-              <option value="Alle">Alle Status</option>
-              <option value="Zu reparieren">Zu reparieren</option>
-              <option value="Inseriert">Inseriert</option>
-              <option value="Verkauft">Verkauft</option>
-              <option value="Infrastruktur">Infrastruktur</option>
-            </select>
+            {tableViewMode === 'expanded' && (
+              <>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  className={`h-9 px-3 border-slate-700 ${showAdvancedFilters ? 'bg-slate-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+                >
+                  <Filter className="w-4 h-4 mr-1" /> Filter
+                </Button>
+                <select
+                  className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value as any)}
+                >
+                  <option value="Alle">Alle Status</option>
+                  <option value="Zu reparieren">Zu reparieren</option>
+                  <option value="Inseriert">Inseriert</option>
+                  <option value="Verkauft">Verkauft</option>
+                  <option value="Infrastruktur">Infrastruktur</option>
+                </select>
+              </>
+            )}
           </div>
         </CardHeader>
+
+        {tableViewMode === 'expanded' && showAdvancedFilters && (
+          <div className="p-4 bg-slate-900/50 border-b border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 animate-in slide-in-from-top-2 duration-200">
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Ankauf von</label>
+              <Input 
+                type="date" 
+                className="h-8 text-xs bg-slate-800 border-slate-700" 
+                value={purchaseDateStart}
+                onChange={(e) => setPurchaseDateStart(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Ankauf bis</label>
+              <Input 
+                type="date" 
+                className="h-8 text-xs bg-slate-800 border-slate-700" 
+                value={purchaseDateEnd}
+                onChange={(e) => setPurchaseDateEnd(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Preis von (€)</label>
+              <Input 
+                type="number" 
+                placeholder="Min..." 
+                className="h-8 text-xs bg-slate-800 border-slate-700" 
+                value={minSellingPrice}
+                onChange={(e) => setMinSellingPrice(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Preis bis (€)</label>
+              <Input 
+                type="number" 
+                placeholder="Max..." 
+                className="h-8 text-xs bg-slate-800 border-slate-700" 
+                value={maxSellingPrice}
+                onChange={(e) => setMaxSellingPrice(e.target.value)}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-8 text-xs text-slate-500 hover:text-slate-300"
+                onClick={() => {
+                  setPurchaseDateStart('');
+                  setPurchaseDateEnd('');
+                  setMinSellingPrice('');
+                  setMaxSellingPrice('');
+                  setFilterStatus('Alle');
+                  setSearchQuery('');
+                }}
+              >
+                Filter zurücksetzen
+              </Button>
+            </div>
+          </div>
+        )}
         <CardContent className="pt-0 px-0">
           <div className="overflow-auto max-h-[70vh] md:max-h-none">
             <table className="w-full text-sm text-left text-slate-300 min-w-[800px] border-separate border-spacing-0">
@@ -848,7 +1084,7 @@ export function TrackingModule({
             </CardHeader>
             <CardContent className="p-4 pt-0">
               <div className="h-[250px]">
-                <Line data={stundenlohnChartData} options={commonOptions} />
+                <Line data={stundenlohnChartData} options={stundenlohnOptions} />
               </div>
             </CardContent>
           </Card>
@@ -870,7 +1106,7 @@ export function TrackingModule({
             </CardHeader>
             <CardContent className="p-4 pt-0">
               <div className="h-[250px]">
-                <Line data={gewinnPeriodeChartData} options={commonOptions} />
+                <Line data={gewinnPeriodeChartData} options={gewinnPeriodeOptions} />
               </div>
             </CardContent>
           </Card>
@@ -1133,6 +1369,123 @@ export function TrackingModule({
               </div>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* Detailed Period Modal */}
+      {selectedPeriodIndex !== null && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-900/50">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-100">Details: {periodDetails[selectedPeriodIndex].label}</h2>
+                <p className="text-sm text-slate-400">Übersicht der Aktivitäten in diesem Zeitraum</p>
+              </div>
+              <button 
+                onClick={() => setSelectedPeriodIndex(null)}
+                className="p-2 rounded-full text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto space-y-8">
+              {/* Summary Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Gekauft</p>
+                  <p className="text-xl font-bold text-slate-100">{periodDetails[selectedPeriodIndex].bought.length}</p>
+                </div>
+                <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Verkauft</p>
+                  <p className="text-xl font-bold text-slate-100">{periodDetails[selectedPeriodIndex].sold.length}</p>
+                </div>
+                <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Arbeitszeit</p>
+                  <p className="text-xl font-bold text-slate-100">{periodDetails[selectedPeriodIndex].totalHours.toFixed(1)}h</p>
+                </div>
+                <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Material</p>
+                  <p className="text-xl font-bold text-slate-100">{formatCurrency(periodDetails[selectedPeriodIndex].totalExpenses)}</p>
+                </div>
+              </div>
+
+              {/* Activity Lists */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Inventory Changes */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">Bestand</h3>
+                  {periodDetails[selectedPeriodIndex].bought.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-emerald-500">Neu Gekauft:</p>
+                      <ul className="space-y-1">
+                        {periodDetails[selectedPeriodIndex].bought.map((name, i) => (
+                          <li key={i} className="text-sm text-slate-300 flex items-center">
+                            <Plus className="w-3 h-3 mr-2 text-emerald-500" /> {name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {periodDetails[selectedPeriodIndex].sold.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-orange-500">Verkauft:</p>
+                      <ul className="space-y-1">
+                        {periodDetails[selectedPeriodIndex].sold.map((name, i) => (
+                          <li key={i} className="text-sm text-slate-300 flex items-center">
+                            <Check className="w-3 h-3 mr-2 text-orange-500" /> {name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {periodDetails[selectedPeriodIndex].bought.length === 0 && periodDetails[selectedPeriodIndex].sold.length === 0 && (
+                    <p className="text-sm text-slate-600 italic">Keine Bestandsänderungen.</p>
+                  )}
+                </div>
+
+                {/* Work & Expenses */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">Arbeit & Material</h3>
+                  {periodDetails[selectedPeriodIndex].workSessions.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-blue-500">Arbeitszeiten:</p>
+                      <ul className="space-y-1">
+                        {periodDetails[selectedPeriodIndex].workSessions.map((session, i) => (
+                          <li key={i} className="text-sm text-slate-300 flex justify-between">
+                            <span>{session.bikeName}</span>
+                            <span className="text-slate-500">{(session.duration / 3600).toFixed(1)}h</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {periodDetails[selectedPeriodIndex].materialExpenses.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-purple-500">Materialausgaben:</p>
+                      <ul className="space-y-1">
+                        {periodDetails[selectedPeriodIndex].materialExpenses.map((exp, i) => (
+                          <li key={i} className="text-sm text-slate-300 flex justify-between">
+                            <span className="truncate pr-4">{exp.bikeName}: {exp.desc}</span>
+                            <span className="text-slate-500 whitespace-nowrap">{formatCurrency(exp.amount)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {periodDetails[selectedPeriodIndex].workSessions.length === 0 && periodDetails[selectedPeriodIndex].materialExpenses.length === 0 && (
+                    <p className="text-sm text-slate-600 italic">Keine Ausgaben oder Arbeitszeiten.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6 border-t border-slate-800 bg-slate-900/50 flex justify-end">
+              <Button onClick={() => setSelectedPeriodIndex(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200">
+                Schließen
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

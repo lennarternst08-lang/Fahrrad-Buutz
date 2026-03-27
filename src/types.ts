@@ -13,6 +13,12 @@ export interface ChecklistItem {
   completed: boolean;
 }
 
+export interface WorkLog {
+  id: string;
+  timestamp: string;
+  durationSeconds: number;
+}
+
 export interface Bike {
   id: string;
   name: string;
@@ -27,6 +33,7 @@ export interface Bike {
   lastModified: number; // For sorting in workshop
   expenses: Expense[];
   checklist: ChecklistItem[];
+  workLogs?: WorkLog[];
   notes: string;
   photos: string[];
   userId?: string;

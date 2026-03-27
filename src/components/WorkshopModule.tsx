@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bike, Expense, ChecklistItem } from '../types';
+import { Bike, Expense, ChecklistItem, WorkLog } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { formatTime, formatCurrency } from '../lib/utils';
-import { Play, Pause, RotateCcw, Plus, Camera, CheckSquare, Wrench, Trash2, CheckCircle2, Circle, Undo2, Search, Eye, X } from 'lucide-react';
+import { Play, Pause, RotateCcw, Plus, Camera, CheckSquare, Wrench, Trash2, CheckCircle2, Circle, Undo2, Search, Eye, X, Clock } from 'lucide-react';
 
 interface WorkshopModuleProps {
   bikes: Bike[];
@@ -112,11 +112,20 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
       // Stop timer
       setIsRunning(false);
       setTime((currentTime) => {
+        const elapsed = activeBike.startTime ? Math.floor((Date.now() - activeBike.startTime) / 1000) : 0;
+        
+        const newWorkLog: WorkLog = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: new Date().toISOString(),
+          durationSeconds: elapsed
+        };
+
         updateBike(activeBike.id, { 
           timeSpentSeconds: currentTime,
-          startTime: null 
+          startTime: null,
+          workLogs: [...(activeBike.workLogs || []), newWorkLog]
         });
-        const elapsed = activeBike.startTime ? Math.floor((Date.now() - activeBike.startTime) / 1000) : 0;
+        
         const startStr = activeBike.startTime ? new Date(activeBike.startTime).toLocaleTimeString('de-DE') : 'unbekannt';
         addLog(`Stoppuhr gestoppt für "${activeBike.name}". Gestartet um ${startStr}. Dauer: ${formatTime(elapsed)}.`, 'stopwatch');
         return currentTime;
@@ -149,7 +158,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
       id: Math.random().toString(36).substr(2, 9),
       description: expenseDesc,
       amount,
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toISOString(),
     };
 
     updateBike(activeBike.id, {
@@ -468,17 +477,29 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
               
               <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
                 {activeBike.expenses.map((exp) => (
-                  <div key={exp.id} className="flex justify-between items-center p-2 rounded bg-slate-800/50 text-sm group">
-                    <span className="text-slate-300 truncate pr-2">{exp.description}</span>
-                    <div className="flex items-center space-x-3">
-                      <span className="font-medium text-slate-200 whitespace-nowrap">{formatCurrency(exp.amount)}</span>
-                      <button 
-                        onClick={() => handleDeleteExpense(exp.id)}
-                        className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                        title="Löschen"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                  <div key={exp.id} className="flex flex-col p-2 rounded bg-slate-800/50 text-sm group">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-300 truncate pr-2 font-medium">{exp.description}</span>
+                      <div className="flex items-center space-x-3">
+                        <span className="font-bold text-slate-100 whitespace-nowrap">{formatCurrency(exp.amount)}</span>
+                        <button 
+                          onClick={() => handleDeleteExpense(exp.id)}
+                          className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                          title="Löschen"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5 flex items-center">
+                      <Clock className="w-3 h-3 mr-1" />
+                      {new Date(exp.date).toLocaleString('de-DE', { 
+                        day: '2-digit', 
+                        month: '2-digit', 
+                        year: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
                     </div>
                   </div>
                 ))}
