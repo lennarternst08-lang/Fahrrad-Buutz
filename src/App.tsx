@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Component, ReactNode } from 'react';
 import { TrackingModule } from './components/TrackingModule';
 import { WorkshopModule } from './components/WorkshopModule';
 import { DailyTodoModule } from './components/DailyTodoModule';
 import { Bike, DailyTodo, Log } from './types';
-import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X, LogIn, LogOut, RotateCcw } from 'lucide-react';
+import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X, LogIn, LogOut, RotateCcw, Calendar } from 'lucide-react';
 import { auth, db, signInWithGoogle, logout } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
@@ -639,7 +639,55 @@ const initialBikes: Bike[] = [
   }
 ];
 
-export default function App() {
+// Error Boundary Component
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: any }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-red-500/30 p-8 rounded-2xl max-w-md w-full text-center shadow-2xl">
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <X className="w-8 h-8 text-red-500" />
+            </div>
+            <h1 className="text-2xl font-bold text-white mb-4">Hoppla! Etwas ist schiefgelaufen.</h1>
+            <p className="text-slate-400 mb-6">
+              Die Anwendung hat einen unerwarteten Fehler festgestellt. Bitte lade die Seite neu.
+            </p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center"
+            >
+              <RotateCcw className="w-5 h-5 mr-2" />
+              Seite neu laden
+            </button>
+            {process.env.NODE_ENV === 'development' && (
+              <div className="mt-6 p-4 bg-black/40 rounded-lg text-left overflow-auto max-h-40">
+                <code className="text-xs text-red-400">{this.state.error?.toString()}</code>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function App() {
   const [activeTab, setActiveTab] = useState<'tracking' | 'workshop' | 'daily'>('tracking');
   const [trackingScrollPos, setTrackingScrollPos] = useState(0);
   const [isTiedCapitalExpanded, setIsTiedCapitalExpanded] = useState(false);
@@ -705,6 +753,18 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    try {
+      await signInWithGoogle();
+    } finally {
+      setIsLoggingIn(false);
+      setIsProfileMenuOpen(false);
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -1326,11 +1386,12 @@ export default function App() {
                   </button>
                 ) : (
                   <button 
-                    onClick={() => { signInWithGoogle(); setIsProfileMenuOpen(false); }}
-                    className="w-full flex items-center px-3 py-2 text-sm text-emerald-400 hover:bg-slate-800 hover:text-emerald-300 rounded-md transition-colors"
+                    onClick={handleLogin}
+                    disabled={isLoggingIn}
+                    className={`w-full flex items-center px-3 py-2 text-sm text-emerald-400 hover:bg-slate-800 hover:text-emerald-300 rounded-md transition-colors ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <LogIn className="w-4 h-4 mr-2" />
-                    Mit Google anmelden
+                    {isLoggingIn ? 'Anmeldung läuft...' : 'Mit Google anmelden'}
                   </button>
                 )}
               </div>
@@ -1486,6 +1547,15 @@ export default function App() {
             <Wrench className={`w-6 h-6 mb-1 ${activeTab === 'workshop' ? 'fill-orange-500/20' : ''}`} />
             <span className="text-[10px] font-bold tracking-wider">WERKSTATT</span>
           </button>
+          <button
+            onClick={() => handleTabChange('daily')}
+            className={`flex flex-col items-center justify-center w-full py-3 rounded-xl transition-colors ${
+              activeTab === 'daily' ? 'text-orange-500' : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <Calendar className={`w-6 h-6 mb-1 ${activeTab === 'daily' ? 'fill-orange-500/20' : ''}`} />
+            <span className="text-[10px] font-bold tracking-wider">DAILY</span>
+          </button>
         </div>
       </nav>
 
@@ -1497,5 +1567,13 @@ export default function App() {
         onChange={importBackup} 
       />
     </div>
+  );
+}
+
+export default function AppWrapper() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   );
 }
