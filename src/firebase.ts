@@ -11,21 +11,16 @@ export const googleProvider = new GoogleAuthProvider();
 export const signInWithGoogle = async () => {
   try {
     console.log("Starting Google Sign-In...");
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    
-    if (isMobile) {
-      console.log("Mobile device detected, using signInWithRedirect...");
-      await signInWithRedirect(auth, googleProvider);
-    } else {
-      const result = await signInWithPopup(auth, googleProvider);
-      console.log("Sign-In successful:", result.user.email);
-    }
+    const result = await signInWithPopup(auth, googleProvider);
+    console.log("Sign-In successful:", result.user.email);
   } catch (error: any) {
     console.error("Error signing in with Google:", error.code, error.message);
     if (error.code === 'auth/popup-blocked') {
-      alert("Popup wurde blockiert. Bitte erlaube Popups für diese Seite.");
+      alert("Popup wurde blockiert. Bitte erlaube Popups für diese Seite in den Safari/Browser-Einstellungen.");
     } else if (error.code === 'auth/operation-not-allowed') {
       alert("Google-Anmeldung ist in Firebase noch nicht aktiviert. Bitte kontaktiere den Support.");
+    } else if (error.code === 'auth/unauthorized-domain') {
+      alert("Domain nicht autorisiert: " + window.location.hostname + "\nBitte stelle sicher, dass exakt diese Domain in Firebase eingetragen ist.");
     } else {
       alert("Fehler bei der Anmeldung: " + error.message);
     }

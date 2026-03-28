@@ -22,6 +22,7 @@ import {
   format, subDays, subWeeks, subMonths, subYears, 
   isSameDay, isSameWeek, isSameMonth, isSameYear, 
   parseISO, endOfDay, endOfWeek, endOfMonth, endOfYear,
+  startOfWeek, startOfMonth,
   differenceInDays
 } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -231,9 +232,9 @@ export function TrackingModule({
     const now = new Date();
     switch (tf) {
       case 'day': return Array.from({ length: 14 }).map((_, i) => subDays(now, 13 - i));
-      case 'week': return Array.from({ length: 12 }).map((_, i) => subWeeks(now, 11 - i));
-      case 'month': return Array.from({ length: 6 }).map((_, i) => subMonths(now, 5 - i));
-      case 'year': return Array.from({ length: 12 }).map((_, i) => subMonths(now, 11 - i));
+      case 'week': return Array.from({ length: 12 }).map((_, i) => startOfWeek(subWeeks(now, 11 - i), { weekStartsOn: 1 }));
+      case 'month': return Array.from({ length: 6 }).map((_, i) => startOfMonth(subMonths(now, 5 - i)));
+      case 'year': return Array.from({ length: 12 }).map((_, i) => startOfMonth(subMonths(now, 11 - i)));
     }
   };
 
