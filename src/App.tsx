@@ -1107,28 +1107,78 @@ function App() {
   };
 
   const exportCSV = () => {
-    const headers = ['ID', 'Name', 'Status', 'Einkaufspreis', 'Einkaufsdatum', 'Ziel VK', 'Verkaufspreis', 'Verkaufsdatum', 'Zeit (h)', 'Kosten Material'];
-    const rows = bikes.map(b => {
-      const expenses = b.expenses.reduce((sum, e) => sum + e.amount, 0);
-      return [
-        b.id,
-        `"${b.name}"`,
-        b.status,
-        b.purchasePrice,
-        b.purchaseDate,
-        b.targetSellingPrice || '',
-        b.sellingPrice || '',
-        b.saleDate || '',
-        (b.timeSpentSeconds / 3600).toFixed(2),
-        expenses
-      ].join(',');
+    const events: any[] = [];
+    
+    bikes.forEach(b => {
+      if (b.purchaseDate) {
+        events.push({
+          date: b.purchaseDate,
+          type: 'Kauf',
+          bike: b.name,
+          status: b.status,
+          desc: 'Fahrrad gekauft',
+          amount: -b.purchasePrice,
+          duration: 0
+        });
+      }
+      if (b.saleDate && b.sellingPrice) {
+        events.push({
+          date: b.saleDate,
+          type: 'Verkauf',
+          bike: b.name,
+          status: b.status,
+          desc: 'Fahrrad verkauft',
+          amount: b.sellingPrice,
+          duration: 0
+        });
+      }
+      b.expenses.forEach(e => {
+        if (e.date) {
+          events.push({
+            date: e.date,
+            type: 'Material',
+            bike: b.name,
+            status: b.status,
+            desc: e.description,
+            amount: -e.amount,
+            duration: 0
+          });
+        }
+      });
+      b.workLogs?.forEach(w => {
+        if (w.timestamp) {
+          events.push({
+            date: w.timestamp,
+            type: 'Arbeitszeit',
+            bike: b.name,
+            status: b.status,
+            desc: 'Arbeit',
+            amount: 0,
+            duration: (w.durationSeconds / 3600).toFixed(2)
+          });
+        }
+      });
     });
+
+    events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    const headers = ['Datum', 'Typ', 'Fahrrad', 'Status', 'Beschreibung', 'Betrag (€)', 'Dauer (h)'];
+    const rows = events.map(e => [
+      e.date.split('T')[0],
+      e.type,
+      `"${e.bike}"`,
+      `"${e.status}"`,
+      `"${e.desc}"`,
+      e.amount,
+      e.duration
+    ].join(','));
+    
     const csvContent = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `flipbike_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `flipbike_chronologie_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1346,7 +1396,7 @@ function App() {
                   className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
                 >
                   <Download className="w-4 h-4 mr-2" />
-                  Als CSV exportieren
+                  Chronologie als CSV
                 </button>
                 <button 
                   onClick={downloadCharts}

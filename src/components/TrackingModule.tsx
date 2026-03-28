@@ -218,7 +218,15 @@ export function TrackingModule({
     : 0;
 
   const activeBikesWithCapital = bikes
-    .filter(b => b.status !== 'Verkauft')
+    .filter(b => b.status !== 'Verkauft' && b.status !== 'Infrastruktur')
+    .map(bike => {
+      const expenses = bike.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      return { ...bike, tiedCapital: bike.purchasePrice + expenses };
+    })
+    .sort((a, b) => b.tiedCapital - a.tiedCapital);
+
+  const infrastructureWithCapital = bikes
+    .filter(b => b.status === 'Infrastruktur')
     .map(bike => {
       const expenses = bike.expenses.reduce((sum, exp) => sum + exp.amount, 0);
       return { ...bike, tiedCapital: bike.purchasePrice + expenses };
@@ -226,6 +234,8 @@ export function TrackingModule({
     .sort((a, b) => b.tiedCapital - a.tiedCapital);
 
   const tiedCapital = activeBikesWithCapital.reduce((acc, bike) => acc + bike.tiedCapital, 0);
+  const infrastructureCapital = infrastructureWithCapital.reduce((acc, bike) => acc + bike.tiedCapital, 0);
+  const totalTiedCapital = tiedCapital + infrastructureCapital;
 
   // --- Chart Calculations ---
   const getPeriods = (tf: 'day' | 'week' | 'month' | 'year') => {
@@ -296,19 +306,23 @@ export function TrackingModule({
   const gewinnData = umsatzData.map((umsatz, i) => umsatz - investData[i]);
 
   const periodDetails = periods.map(period => {
-    const bought: string[] = [];
-    const sold: string[] = [];
+    const bought: { name: string, price: number }[] = [];
+    const sold: { name: string, price: number }[] = [];
     const workSessions: { bikeName: string, duration: number }[] = [];
     const materialExpenses: { bikeName: string, desc: string, amount: number }[] = [];
     let totalHours = 0;
     let totalExpenses = 0;
+    let totalPurchasePrice = 0;
+    let totalSellingPrice = 0;
     
     bikes.forEach(bike => {
       if (bike.purchaseDate && isSamePeriod(parseISO(bike.purchaseDate), period, timeframe)) {
-        bought.push(bike.name);
+        bought.push({ name: bike.name, price: bike.purchasePrice });
+        totalPurchasePrice += bike.purchasePrice;
       }
       if (bike.saleDate && isSamePeriod(parseISO(bike.saleDate), period, timeframe)) {
-        sold.push(bike.name);
+        sold.push({ name: bike.name, price: bike.sellingPrice || 0 });
+        totalSellingPrice += (bike.sellingPrice || 0);
       }
       
       // Work logs
@@ -328,12 +342,17 @@ export function TrackingModule({
       });
     });
     
+    const balance = totalSellingPrice - totalPurchasePrice - totalExpenses;
+
     return { 
       label: formatPeriod(period, timeframe),
       bought, 
       sold, 
       totalHours, 
       totalExpenses, 
+      totalPurchasePrice,
+      totalSellingPrice,
+      balance,
       workSessions, 
       materialExpenses 
     };
@@ -464,8 +483,8 @@ export function TrackingModule({
             const index = context[0].dataIndex;
             const details = periodDetails[index];
             const lines = [];
-            if (details.bought.length > 0) lines.push(`Gekauft: ${details.bought.join(', ')}`);
-            if (details.sold.length > 0) lines.push(`Verkauft: ${details.sold.join(', ')}`);
+            if (details.bought.length > 0) lines.push(`Gekauft: ${details.bought.map(b => b.name).join(', ')}`);
+            if (details.sold.length > 0) lines.push(`Verkauft: ${details.sold.map(b => b.name).join(', ')}`);
             if (details.totalHours > 0) lines.push(`Arbeitszeit: ${details.totalHours.toFixed(1)}h`);
             return lines.length > 0 ? '\n' + lines.join('\n') : '';
           }
@@ -486,8 +505,8 @@ export function TrackingModule({
             const index = context[0].dataIndex;
             const details = periodDetails[index];
             const lines = [];
-            if (details.bought.length > 0) lines.push(`Gekauft: ${details.bought.join(', ')}`);
-            if (details.sold.length > 0) lines.push(`Verkauft: ${details.sold.join(', ')}`);
+            if (details.bought.length > 0) lines.push(`Gekauft: ${details.bought.map(b => b.name).join(', ')}`);
+            if (details.sold.length > 0) lines.push(`Verkauft: ${details.sold.map(b => b.name).join(', ')}`);
             if (details.totalHours > 0) lines.push(`Arbeitszeit: ${details.totalHours.toFixed(1)}h`);
             if (details.totalExpenses > 0) lines.push(`Material: ${formatCurrency(details.totalExpenses)}`);
             return lines.length > 0 ? '\n' + lines.join('\n') : '';
@@ -1065,7 +1084,31 @@ export function TrackingModule({
                   </div>
                 ))}
                 {activeBikesWithCapital.length === 0 && (
-                  <p className="text-sm text-slate-500 text-center py-2">Kein gebundenes Kapital.</p>
+                  <p className="text-sm text-slate-500 text-center py-2">Kein gebundenes Kapital (Fahrräder).</p>
+                )}
+                
+                {infrastructureWithCapital.length > 0 && (
+                  <>
+                    <div className="my-3 border-t border-slate-700/50"></div>
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">Infrastruktur</p>
+                    {infrastructureWithCapital.map(bike => (
+                      <div 
+                        key={bike.id} 
+                        className="flex justify-between items-center text-sm hover:bg-slate-700/50 p-2 -mx-2 rounded cursor-pointer transition-colors group"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNavigateToWorkshop(bike.id);
+                        }}
+                      >
+                        <span className="text-slate-400 truncate pr-2 group-hover:text-blue-400 transition-colors">{bike.name}</span>
+                        <span className="text-slate-300 font-medium whitespace-nowrap">{formatCurrency(bike.tiedCapital)}</span>
+                      </div>
+                    ))}
+                    <div className="mt-3 pt-3 border-t border-slate-700 flex justify-between items-center">
+                      <span className="text-sm font-bold text-slate-300">Gesamt (inkl. Infrastruktur)</span>
+                      <span className="text-sm font-bold text-blue-400">{formatCurrency(totalTiedCapital)}</span>
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -1393,7 +1436,12 @@ export function TrackingModule({
           <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-900/50">
               <div>
-                <h2 className="text-2xl font-bold text-slate-100">Details: {periodDetails[selectedPeriodIndex].label}</h2>
+                <h2 className="text-2xl font-bold text-slate-100">
+                  Details: {periodDetails[selectedPeriodIndex].label}
+                  <span className={`ml-4 text-lg ${periodDetails[selectedPeriodIndex].balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    Bilanz: {periodDetails[selectedPeriodIndex].balance > 0 ? '+' : ''}{formatCurrency(periodDetails[selectedPeriodIndex].balance)}
+                  </span>
+                </h2>
                 <p className="text-sm text-slate-400">Übersicht der Aktivitäten in diesem Zeitraum</p>
               </div>
               <button 
@@ -1408,12 +1456,12 @@ export function TrackingModule({
               {/* Summary Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Gekauft</p>
-                  <p className="text-xl font-bold text-slate-100">{periodDetails[selectedPeriodIndex].bought.length}</p>
+                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Gekauft ({periodDetails[selectedPeriodIndex].bought.length})</p>
+                  <p className="text-xl font-bold text-slate-100">{formatCurrency(periodDetails[selectedPeriodIndex].totalPurchasePrice)}</p>
                 </div>
                 <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Verkauft</p>
-                  <p className="text-xl font-bold text-slate-100">{periodDetails[selectedPeriodIndex].sold.length}</p>
+                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Verkauft ({periodDetails[selectedPeriodIndex].sold.length})</p>
+                  <p className="text-xl font-bold text-slate-100">{formatCurrency(periodDetails[selectedPeriodIndex].totalSellingPrice)}</p>
                 </div>
                 <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
                   <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Arbeitszeit</p>
@@ -1434,9 +1482,10 @@ export function TrackingModule({
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-emerald-500">Neu Gekauft:</p>
                       <ul className="space-y-1">
-                        {periodDetails[selectedPeriodIndex].bought.map((name, i) => (
-                          <li key={i} className="text-sm text-slate-300 flex items-center">
-                            <Plus className="w-3 h-3 mr-2 text-emerald-500" /> {name}
+                        {periodDetails[selectedPeriodIndex].bought.map((item, i) => (
+                          <li key={i} className="text-sm text-slate-300 flex justify-between items-center">
+                            <span className="flex items-center"><Plus className="w-3 h-3 mr-2 text-emerald-500" /> {item.name}</span>
+                            <span className="text-slate-500">{formatCurrency(item.price)}</span>
                           </li>
                         ))}
                       </ul>
@@ -1446,9 +1495,10 @@ export function TrackingModule({
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-orange-500">Verkauft:</p>
                       <ul className="space-y-1">
-                        {periodDetails[selectedPeriodIndex].sold.map((name, i) => (
-                          <li key={i} className="text-sm text-slate-300 flex items-center">
-                            <Check className="w-3 h-3 mr-2 text-orange-500" /> {name}
+                        {periodDetails[selectedPeriodIndex].sold.map((item, i) => (
+                          <li key={i} className="text-sm text-slate-300 flex justify-between items-center">
+                            <span className="flex items-center"><Check className="w-3 h-3 mr-2 text-orange-500" /> {item.name}</span>
+                            <span className="text-slate-500">{formatCurrency(item.price)}</span>
                           </li>
                         ))}
                       </ul>
