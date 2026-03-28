@@ -46,6 +46,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
   const [time, setTime] = useState(0);
   const [manualTime, setManualTime] = useState('');
   const [lastResetTime, setLastResetTime] = useState<number | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const timerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,33 +63,80 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
   // Photo preview state
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
-  // Sync time when active bike changes
+  // Monitor online status
   useEffect(() => {
-    if (activeBike) {
-      let currentTime = activeBike.timeSpentSeconds;
-      let running = false;
-      
-      if (activeBike.startTime) {
-        // Calculate elapsed time since it was started
-        const elapsedSeconds = Math.floor((Date.now() - activeBike.startTime) / 1000);
-        currentTime += elapsedSeconds;
-        running = true;
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Sync time when active bike changes or on mount
+  useEffect(() => {
+    const syncTimer = () => {
+      if (activeBike) {
+        let currentTime = activeBike.timeSpentSeconds || 0;
+        let running = false;
+        
+        try {
+          // Check local storage first for a more up-to-date "active" timer (in case of offline/background)
+          const localTimerJson = localStorage.getItem('flipbike_active_timer');
+          if (localTimerJson) {
+            const localTimer = JSON.parse(localTimerJson);
+            if (localTimer && localTimer.bikeId === activeBike.id) {
+              const elapsedSeconds = Math.floor((Date.now() - localTimer.startTime) / 1000);
+              currentTime = (localTimer.initialTime || 0) + elapsedSeconds;
+              running = true;
+            }
+          } else if (activeBike.startTime) {
+            // Fallback to DB startTime if no local timer exists
+            const elapsedSeconds = Math.floor((Date.now() - activeBike.startTime) / 1000);
+            currentTime += elapsedSeconds;
+            running = true;
+          }
+        } catch (e) {
+          console.error("Error syncing timer from localStorage:", e);
+          localStorage.removeItem('flipbike_active_timer');
+        }
+        
+        setTime(currentTime);
+        setNotes(activeBike.notes || '');
+        setIsRunning(running);
       }
-      
-      setTime(currentTime);
-      setNotes(activeBike.notes);
-      setIsRunning(running);
-    }
+    };
+
+    syncTimer();
+
+    // Handle visibility change (e.g. returning from background)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncTimer();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [activeBikeId, activeBike?.timeSpentSeconds, activeBike?.startTime]);
 
-  // Timer logic
+  // Timer logic (UI only)
   useEffect(() => {
     if (isRunning) {
       timerRef.current = window.setInterval(() => {
-        setTime((prev) => {
-          const newTime = prev + 1;
-          return newTime;
-        });
+        // Recalculate from start time to avoid drift and background issues
+        if (activeBike) {
+          const localTimerJson = localStorage.getItem('flipbike_active_timer');
+          if (localTimerJson) {
+            const localTimer = JSON.parse(localTimerJson);
+            const elapsedSeconds = Math.floor((Date.now() - localTimer.startTime) / 1000);
+            setTime(localTimer.initialTime + elapsedSeconds);
+          } else if (activeBike.startTime) {
+            const elapsedSeconds = Math.floor((Date.now() - activeBike.startTime) / 1000);
+            setTime(activeBike.timeSpentSeconds + elapsedSeconds);
+          }
+        }
       }, 1000);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -96,7 +144,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isRunning, activeBikeId, updateBike]);
+  }, [isRunning, activeBikeId, activeBike?.startTime]);
 
   const toggleTimer = () => {
     if (!activeBike) return;
@@ -104,33 +152,65 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
     if (isRunning) {
       // Stop timer
       setIsRunning(false);
-      setTime((currentTime) => {
-        const elapsed = activeBike.startTime ? Math.floor((Date.now() - activeBike.startTime) / 1000) : 0;
-        
-        const newWorkLog: WorkLog = {
-          id: Math.random().toString(36).substr(2, 9),
-          timestamp: new Date().toISOString(),
-          durationSeconds: elapsed
-        };
+      const now = Date.now();
+      
+      // Get the actual elapsed time from the start timestamp
+      let elapsed = 0;
+      let totalTime = time;
+      
+      const localTimerJson = localStorage.getItem('flipbike_active_timer');
+      if (localTimerJson) {
+        const localTimer = JSON.parse(localTimerJson);
+        elapsed = Math.floor((now - localTimer.startTime) / 1000);
+        totalTime = localTimer.initialTime + elapsed;
+      } else if (activeBike.startTime) {
+        elapsed = Math.floor((now - activeBike.startTime) / 1000);
+        totalTime = activeBike.timeSpentSeconds + elapsed;
+      }
 
+      const newWorkLog: WorkLog = {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: new Date().toISOString(),
+        durationSeconds: elapsed
+      };
+
+      // Clear local timer immediately
+      localStorage.removeItem('flipbike_active_timer');
+
+      try {
         updateBike(activeBike.id, { 
-          timeSpentSeconds: currentTime,
+          timeSpentSeconds: totalTime,
           startTime: null,
           workLogs: [...(activeBike.workLogs || []), newWorkLog]
         });
         
         const startStr = activeBike.startTime ? new Date(activeBike.startTime).toLocaleTimeString('de-DE') : 'unbekannt';
         addLog(`Stoppuhr gestoppt für "${activeBike.name}". Gestartet um ${startStr}. Dauer: ${formatTime(elapsed)}.`, 'stopwatch');
-        return currentTime;
-      });
+      } catch (error) {
+        console.error("Failed to stop timer in DB:", error);
+        // Persistence is enabled, so Firestore will handle the sync when online.
+        // But we already updated the local state via updateBike (if it's optimistic).
+      }
     } else {
       // Start timer
       setIsRunning(true);
       const now = Date.now();
-      updateBike(activeBike.id, {
-        startTime: now
-      });
-      addLog(`Stoppuhr gestartet für "${activeBike.name}" um ${new Date(now).toLocaleTimeString('de-DE')}.`, 'stopwatch');
+      
+      // Store in local storage for background/offline survival
+      localStorage.setItem('flipbike_active_timer', JSON.stringify({
+        bikeId: activeBike.id,
+        startTime: now,
+        initialTime: activeBike.timeSpentSeconds
+      }));
+
+      try {
+        updateBike(activeBike.id, {
+          startTime: now
+        });
+        addLog(`Stoppuhr gestartet für "${activeBike.name}" um ${new Date(now).toLocaleTimeString('de-DE')}.`, 'stopwatch');
+      } catch (error) {
+        console.error("Failed to start timer in DB:", error);
+      }
     }
   };
 
@@ -299,6 +379,26 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
         <div className="lg:col-span-2 space-y-6">
           {/* Stopwatch Module */}
           <Card className="border-orange-500/20 bg-gradient-to-b from-slate-900 to-slate-900/50">
+            <CardHeader className="pb-0 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-medium text-slate-400 flex items-center">
+                <Clock className="w-4 h-4 mr-2" />
+                Stoppuhr
+              </CardTitle>
+              <div className="flex items-center space-x-2">
+                {!isOnline && (
+                  <span className="flex items-center text-[10px] text-orange-400 bg-orange-400/10 px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 bg-orange-400 rounded-full mr-1.5 animate-pulse" />
+                    Offline Modus
+                  </span>
+                )}
+                {isOnline && (
+                  <span className="flex items-center text-[10px] text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1.5" />
+                    Synchronisiert
+                  </span>
+                )}
+              </div>
+            </CardHeader>
             <CardContent className="p-8 flex flex-col items-center justify-center">
               <div className="text-6xl md:text-8xl font-mono font-bold text-slate-100 tracking-tighter mb-8 tabular-nums">
                 {formatTime(time)}

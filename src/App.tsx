@@ -746,6 +746,18 @@ function App() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
   const [logFilter, setLogFilter] = useState<'all' | 'tracking' | 'workshop' | 'stopwatch' | 'system'>('all');
   const [logSortOrder, setLogSortOrder] = useState<'desc' | 'asc'>('desc');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -898,10 +910,13 @@ function App() {
       userId: auth.currentUser?.uid
     };
     
+    // Optimistically update local state
+    setLogs(prev => [newLog, ...prev].slice(0, 1000));
+
     if (auth.currentUser) {
-      setDoc(doc(db, 'logs', newLog.id), newLog).catch(e => handleFirestoreError(e, OperationType.CREATE, 'logs'));
-    } else {
-      setLogs(prev => [newLog, ...prev].slice(0, 1000));
+      setDoc(doc(db, 'logs', newLog.id), newLog).catch(e => {
+        console.error("Failed to save log to DB:", e);
+      });
     }
   }, []);
 
@@ -951,16 +966,21 @@ function App() {
       }
       
       const updatedBike = { ...bike, ...updates, lastModified: Date.now() };
+      
+      // Optimistically update local state
+      setBikes((prev) => prev.map((b) => (b.id === id ? updatedBike : b)));
+
       if (auth.currentUser) {
         setIsSyncing(true);
         updateDoc(doc(db, 'bikes', id), { ...updates, lastModified: Date.now() })
           .then(() => setIsSyncing(false))
           .catch(e => {
             setIsSyncing(false);
-            handleFirestoreError(e, OperationType.UPDATE, 'bikes');
+            // If it fails, the snapshot listener will eventually revert it if it was a hard failure,
+            // but with persistence enabled, it should eventually succeed.
+            console.error("Optimistic update failed in DB:", e);
+            // We don't throw here to avoid crashing the UI, but we log it.
           });
-      } else {
-        setBikes((prev) => prev.map((b) => (b.id === id ? updatedBike : b)));
       }
     }
   }, [addLog, bikes]);
@@ -971,10 +991,13 @@ function App() {
       addLog(`Fahrrad gelöscht: "${bike.name}"`, 'tracking', { type: 'delete', data: { ...bike } });
     }
     
+    // Optimistically update local state
+    setBikes((prev) => prev.filter((b) => b.id !== id));
+
     if (auth.currentUser) {
-      deleteDoc(doc(db, 'bikes', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'bikes'));
-    } else {
-      setBikes((prev) => prev.filter((b) => b.id !== id));
+      deleteDoc(doc(db, 'bikes', id)).catch(e => {
+        console.error("Failed to delete bike from DB:", e);
+      });
     }
     
     if (activeWorkshopBikeId === id) {
@@ -1001,10 +1024,13 @@ function App() {
       userId: auth.currentUser?.uid
     };
     
+    // Optimistically update local state
+    setBikes(prev => [newBike, ...prev]);
+
     if (auth.currentUser) {
-      setDoc(doc(db, 'bikes', newBike.id), newBike).catch(e => handleFirestoreError(e, OperationType.CREATE, 'bikes'));
-    } else {
-      setBikes(prev => [newBike, ...prev]);
+      setDoc(doc(db, 'bikes', newBike.id), newBike).catch(e => {
+        console.error("Failed to add bike to DB:", e);
+      });
     }
     addLog(`Fahrrad hinzugefügt: "${newBike.name}"`, 'tracking', { type: 'add', data: newBike.id });
   }, [addLog]);
@@ -1018,10 +1044,13 @@ function App() {
       userId: auth.currentUser?.uid
     };
     
+    // Optimistically update local state
+    setDailyTodos(prev => [...prev, newTodo]);
+
     if (auth.currentUser) {
-      setDoc(doc(db, 'todos', newTodo.id), newTodo).catch(e => handleFirestoreError(e, OperationType.CREATE, 'todos'));
-    } else {
-      setDailyTodos(prev => [...prev, newTodo]);
+      setDoc(doc(db, 'todos', newTodo.id), newTodo).catch(e => {
+        console.error("Failed to add todo to DB:", e);
+      });
     }
     addLog(`To-Do hinzugefügt: "${newTodo.text}"`, 'system');
   }, [addLog]);
@@ -1033,16 +1062,17 @@ function App() {
     const newStatus = !todo.completed;
     const updatedTodo = { ...todo, completed: newStatus };
     
+    // Optimistically update local state
+    setDailyTodos(prev => prev.map(t => t.id === id ? updatedTodo : t));
+
     if (auth.currentUser) {
       setIsSyncing(true);
       updateDoc(doc(db, 'todos', id), { completed: newStatus })
         .then(() => setIsSyncing(false))
         .catch(e => {
           setIsSyncing(false);
-          handleFirestoreError(e, OperationType.UPDATE, 'todos');
+          console.error("Failed to toggle todo in DB:", e);
         });
-    } else {
-      setDailyTodos(prev => prev.map(t => t.id === id ? updatedTodo : t));
     }
     addLog(`To-Do "${todo.text}" als ${newStatus ? 'erledigt' : 'offen'} markiert`, 'system');
   }, [addLog, dailyTodos]);
@@ -1053,10 +1083,13 @@ function App() {
       addLog(`To-Do gelöscht: "${todo.text}"`, 'system');
     }
     
+    // Optimistically update local state
+    setDailyTodos(prev => prev.filter(t => t.id !== id));
+
     if (auth.currentUser) {
-      deleteDoc(doc(db, 'todos', id)).catch(e => handleFirestoreError(e, OperationType.DELETE, 'todos'));
-    } else {
-      setDailyTodos(prev => prev.filter(t => t.id !== id));
+      deleteDoc(doc(db, 'todos', id)).catch(e => {
+        console.error("Failed to delete todo from DB:", e);
+      });
     }
   }, [addLog, dailyTodos]);
 
@@ -1411,8 +1444,10 @@ function App() {
             <span className="font-bold text-xl tracking-tight text-slate-100 leading-none">Flip<span className="text-orange-500">Bike</span></span>
             {user ? (
               <div className="flex items-center mt-1">
-                <div className={`w-1.5 h-1.5 rounded-full mr-1.5 ${isSyncing ? 'bg-orange-500 animate-pulse' : 'bg-emerald-500'}`}></div>
-                <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">{isSyncing ? 'Synchronisiert...' : 'Synchronisiert'}</span>
+                <div className={`w-1.5 h-1.5 rounded-full mr-1.5 ${!isOnline ? 'bg-red-500' : isSyncing ? 'bg-orange-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">
+                  {!isOnline ? 'Offline - Lokal gespeichert' : isSyncing ? 'Synchronisiert...' : 'Synchronisiert'}
+                </span>
               </div>
             ) : (
               <div className="flex items-center mt-1">

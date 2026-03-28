@@ -24,7 +24,8 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
   // Filter bikes that are not sold
   const activeBikes = bikes.filter(b => b.status !== 'Verkauft');
 
-  const handleAddTodo = () => {
+  const handleAddTodo = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!newTodoText.trim()) return;
     addTodo(newTodoText, selectedBikeId);
     setNewTodoText('');
@@ -71,16 +72,15 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
           <CardTitle>Neue Aufgabe</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <form onSubmit={handleAddTodo} className="space-y-4">
             <div className="flex space-x-2">
               <Input
                 placeholder="Was steht heute an? (z.B. Cube putzen)"
                 value={newTodoText}
                 onChange={handleTextChange}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddTodo()}
                 className="flex-1"
               />
-              <Button onClick={handleAddTodo}>
+              <Button type="submit">
                 <Plus className="w-5 h-5 mr-1" /> Hinzufügen
               </Button>
             </div>
@@ -92,6 +92,7 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
                   {activeBikes.filter(b => b.name.toLowerCase().includes(newTodoText.toLowerCase())).map(bike => (
                     <button
                       key={bike.id}
+                      type="button"
                       onClick={() => {
                         setSelectedBikeId(bike.id);
                         setShowBikeSuggestions(false);
@@ -111,6 +112,7 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
                 <BikeIcon className="w-4 h-4 mr-2" />
                 Verknüpft: {bikes.find(b => b.id === selectedBikeId)?.name}
                 <button 
+                  type="button"
                   onClick={() => setSelectedBikeId(undefined)}
                   className="ml-2 text-slate-400 hover:text-slate-200"
                 >
@@ -118,7 +120,7 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
                 </button>
               </div>
             )}
-          </div>
+          </form>
         </CardContent>
       </Card>
 

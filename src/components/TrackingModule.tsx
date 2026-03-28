@@ -132,7 +132,9 @@ export function TrackingModule({
   // Periodic re-render to update running timers
   React.useEffect(() => {
     const interval = setInterval(() => {
-      if (bikes.some(b => b.startTime)) {
+      const localTimerJson = localStorage.getItem('flipbike_active_timer');
+      const hasLocalTimer = !!localTimerJson;
+      if (hasLocalTimer || bikes.some(b => b.startTime)) {
         setTick(t => t + 1);
       }
     }, 10000); // Update every 10 seconds
@@ -922,7 +924,30 @@ export function TrackingModule({
                             {bike.startTime && (
                               <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse mr-1.5 shrink-0"></div>
                             )}
-                            {((bike.timeSpentSeconds + (bike.startTime ? Math.floor((Date.now() - bike.startTime) / 1000) : 0)) / 3600).toFixed(1)}h
+                            {(() => {
+                              let currentSeconds = bike.timeSpentSeconds || 0;
+                              
+                              // Check if this bike has an active timer in DB
+                              if (bike.startTime) {
+                                currentSeconds += Math.floor((Date.now() - bike.startTime) / 1000);
+                              }
+                              
+                              // Check if this bike has an active timer in localStorage (more up-to-date)
+                              try {
+                                const localTimerJson = localStorage.getItem('flipbike_active_timer');
+                                if (localTimerJson) {
+                                  const localTimer = JSON.parse(localTimerJson);
+                                  if (localTimer && localTimer.bikeId === bike.id) {
+                                    const elapsedSeconds = Math.floor((Date.now() - localTimer.startTime) / 1000);
+                                    currentSeconds = (localTimer.initialTime || 0) + elapsedSeconds;
+                                  }
+                                }
+                              } catch (e) {
+                                // Ignore localStorage errors
+                              }
+                              
+                              return (currentSeconds / 3600).toFixed(1);
+                            })()}h
                           </button>
                         </td>
                       )}
