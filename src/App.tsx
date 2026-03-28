@@ -1107,18 +1107,123 @@ function App() {
   };
 
   const exportCSV = () => {
+    const csvLines: string[] = [];
+
+    // --- 1. STATISTIKEN ---
+    const soldBikes = bikes.filter(b => b.status === 'Verkauft');
+    const totalRevenue = soldBikes.reduce((acc, bike) => acc + (bike.sellingPrice || 0), 0);
+    
+    const totalProfit = bikes.reduce((acc, bike) => {
+      const expenses = bike.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      let bikeFlow = -bike.purchasePrice - expenses;
+      if (bike.status === 'Verkauft') {
+        bikeFlow += (bike.sellingPrice || 0);
+      }
+      return acc + bikeFlow;
+    }, 0);
+
+    const soldBikesProfit = soldBikes.reduce((acc, bike) => {
+      const expenses = bike.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      return acc + ((bike.sellingPrice || 0) - bike.purchasePrice - expenses);
+    }, 0);
+
+    const totalTimeSecondsSold = soldBikes.reduce((acc, bike) => acc + bike.timeSpentSeconds, 0);
+    const avgHourlyWage = totalTimeSecondsSold > 0 ? soldBikesProfit / (totalTimeSecondsSold / 3600) : 0;
+    
+    const totalTimeSecondsAll = bikes.reduce((acc, bike) => acc + bike.timeSpentSeconds, 0);
+
+    const activeBikes = bikes.filter(b => b.status !== 'Verkauft' && b.status !== 'Infrastruktur');
+    const tiedCapital = activeBikes.reduce((acc, bike) => {
+      const expenses = bike.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      return acc + bike.purchasePrice + expenses;
+    }, 0);
+
+    const infrastructureBikes = bikes.filter(b => b.status === 'Infrastruktur');
+    const infrastructureCapital = infrastructureBikes.reduce((acc, bike) => {
+      const expenses = bike.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      return acc + bike.purchasePrice + expenses;
+    }, 0);
+
+    csvLines.push('--- PROJEKT STATISTIKEN ---');
+    csvLines.push('Metrik,Wert');
+    csvLines.push(`Gesamtumsatz,${totalRevenue.toFixed(2)}`);
+    csvLines.push(`Gesamtgewinn,${totalProfit.toFixed(2)}`);
+    csvLines.push(`Ø Stundenlohn (Verkaufte),${avgHourlyWage.toFixed(2)}`);
+    csvLines.push(`Gesamtarbeitszeit (h),${(totalTimeSecondsAll / 3600).toFixed(2)}`);
+    csvLines.push(`Gebundenes Kapital (Fahrräder),${tiedCapital.toFixed(2)}`);
+    csvLines.push(`Infrastruktur Ausgaben,${infrastructureCapital.toFixed(2)}`);
+    csvLines.push(`Fahrräder Gekauft (Gesamt),${bikes.filter(b => b.status !== 'Infrastruktur').length}`);
+    csvLines.push(`Fahrräder Verkauft,${soldBikes.length}`);
+    csvLines.push(`Aktueller Bestand (Fahrräder),${activeBikes.length}`);
+    csvLines.push('');
+
+    // --- 2. MONATLICHE ÜBERSICHT ---
+    csvLines.push('--- MONATLICHE ÜBERSICHT ---');
+    csvLines.push('Monat,Eingang (Käufe €),Ausgang (Verkäufe €),Material (€),Gewinn (€),Arbeitszeit (h)');
+    
+    const monthlyStats: { [key: string]: { inflow: number, outflow: number, material: number, profit: number, hours: number } } = {};
+    
+    bikes.forEach(b => {
+      if (b.purchaseDate) {
+        const month = b.purchaseDate.substring(0, 7);
+        if (!monthlyStats[month]) monthlyStats[month] = { inflow: 0, outflow: 0, material: 0, profit: 0, hours: 0 };
+        monthlyStats[month].inflow += b.purchasePrice;
+      }
+      if (b.saleDate && b.sellingPrice) {
+        const month = b.saleDate.substring(0, 7);
+        if (!monthlyStats[month]) monthlyStats[month] = { inflow: 0, outflow: 0, material: 0, profit: 0, hours: 0 };
+        monthlyStats[month].outflow += b.sellingPrice;
+        
+        const expenses = b.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+        monthlyStats[month].profit += (b.sellingPrice - b.purchasePrice - expenses);
+      }
+      b.expenses.forEach(e => {
+        if (e.date) {
+          const month = e.date.substring(0, 7);
+          if (!monthlyStats[month]) monthlyStats[month] = { inflow: 0, outflow: 0, material: 0, profit: 0, hours: 0 };
+          monthlyStats[month].material += e.amount;
+        }
+      });
+      b.workLogs?.forEach(w => {
+        if (w.timestamp) {
+          const month = w.timestamp.substring(0, 7);
+          if (!monthlyStats[month]) monthlyStats[month] = { inflow: 0, outflow: 0, material: 0, profit: 0, hours: 0 };
+          monthlyStats[month].hours += (w.durationSeconds / 3600);
+        }
+      });
+    });
+
+    Object.keys(monthlyStats).sort().reverse().forEach(month => {
+      const s = monthlyStats[month];
+      csvLines.push(`${month},${s.inflow.toFixed(2)},${s.outflow.toFixed(2)},${s.material.toFixed(2)},${s.profit.toFixed(2)},${s.hours.toFixed(2)}`);
+    });
+    csvLines.push('');
+
+    // --- 3. AKTUELLER BESTAND ---
+    csvLines.push('--- AKTUELLER BESTAND ---');
+    csvLines.push('Name,Status,Kaufpreis (€),Materialkosten (€),Gebundenes Kapital (€),Ziel-VK (€),Notizen');
+    activeBikes.forEach(b => {
+      const expenses = b.expenses.reduce((sum, e) => sum + e.amount, 0);
+      const capital = b.purchasePrice + expenses;
+      csvLines.push(`"${b.name}","${b.status}",${b.purchasePrice.toFixed(2)},${expenses.toFixed(2)},${capital.toFixed(2)},${b.targetSellingPrice || 0},"${(b.notes || '').replace(/"/g, '""')}"`);
+    });
+    csvLines.push('');
+
+    // --- 4. CHRONOLOGIE ---
+    csvLines.push('--- CHRONOLOGIE DER EREIGNISSE ---');
     const events: any[] = [];
     
     bikes.forEach(b => {
       if (b.purchaseDate) {
         events.push({
           date: b.purchaseDate,
-          type: 'Kauf',
+          type: b.status === 'Infrastruktur' ? 'Infrastruktur Kauf' : 'Kauf',
           bike: b.name,
           status: b.status,
-          desc: 'Fahrrad gekauft',
+          desc: b.status === 'Infrastruktur' ? 'Infrastruktur angeschafft' : 'Fahrrad gekauft',
           amount: -b.purchasePrice,
-          duration: 0
+          duration: 0,
+          notes: b.notes
         });
       }
       if (b.saleDate && b.sellingPrice) {
@@ -1129,7 +1234,8 @@ function App() {
           status: b.status,
           desc: 'Fahrrad verkauft',
           amount: b.sellingPrice,
-          duration: 0
+          duration: 0,
+          notes: b.notes
         });
       }
       b.expenses.forEach(e => {
@@ -1141,7 +1247,8 @@ function App() {
             status: b.status,
             desc: e.description,
             amount: -e.amount,
-            duration: 0
+            duration: 0,
+            notes: ''
           });
         }
       });
@@ -1154,7 +1261,8 @@ function App() {
             status: b.status,
             desc: 'Arbeit',
             amount: 0,
-            duration: (w.durationSeconds / 3600).toFixed(2)
+            duration: (w.durationSeconds / 3600).toFixed(2),
+            notes: ''
           });
         }
       });
@@ -1162,23 +1270,17 @@ function App() {
 
     events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    const headers = ['Datum', 'Typ', 'Fahrrad', 'Status', 'Beschreibung', 'Betrag (€)', 'Dauer (h)'];
-    const rows = events.map(e => [
-      e.date.split('T')[0],
-      e.type,
-      `"${e.bike}"`,
-      `"${e.status}"`,
-      `"${e.desc}"`,
-      e.amount,
-      e.duration
-    ].join(','));
+    csvLines.push('Datum,Typ,Fahrrad/Objekt,Status,Beschreibung,Betrag (€),Dauer (h),Notizen');
+    events.forEach(e => {
+      csvLines.push(`${e.date.split('T')[0]},"${e.type}","${e.bike}","${e.status}","${e.desc}",${e.amount},${e.duration},"${(e.notes || '').replace(/"/g, '""')}"`);
+    });
     
-    const csvContent = [headers.join(','), ...rows].join('\n');
+    const csvContent = csvLines.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `flipbike_chronologie_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `flipbike_export_komplett_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1396,7 +1498,7 @@ function App() {
                   className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
                 >
                   <Download className="w-4 h-4 mr-2" />
-                  Chronologie als CSV
+                  Vollständiger Projekt-Report (CSV)
                 </button>
                 <button 
                   onClick={downloadCharts}
