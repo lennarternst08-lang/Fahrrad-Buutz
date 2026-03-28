@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -11,8 +11,15 @@ export const googleProvider = new GoogleAuthProvider();
 export const signInWithGoogle = async () => {
   try {
     console.log("Starting Google Sign-In...");
-    const result = await signInWithPopup(auth, googleProvider);
-    console.log("Sign-In successful:", result.user.email);
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+      console.log("Mobile device detected, using signInWithRedirect...");
+      await signInWithRedirect(auth, googleProvider);
+    } else {
+      const result = await signInWithPopup(auth, googleProvider);
+      console.log("Sign-In successful:", result.user.email);
+    }
   } catch (error: any) {
     console.error("Error signing in with Google:", error.code, error.message);
     if (error.code === 'auth/popup-blocked') {
@@ -22,6 +29,7 @@ export const signInWithGoogle = async () => {
     } else {
       alert("Fehler bei der Anmeldung: " + error.message);
     }
+    throw error; // Rethrow so the calling function knows it failed
   }
 };
 

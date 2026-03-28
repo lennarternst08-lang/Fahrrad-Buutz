@@ -760,6 +760,8 @@ function App() {
     setIsLoggingIn(true);
     try {
       await signInWithGoogle();
+    } catch (error) {
+      console.error("Login failed:", error);
     } finally {
       setIsLoggingIn(false);
       setIsProfileMenuOpen(false);
