@@ -278,7 +278,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
 
   const handleChecklistPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const pastedText = e.clipboardData.getData('text');
-    if (pastedText.includes('\n')) {
+    if (pastedText.includes('\n') || pastedText.includes('\\')) {
       e.preventDefault();
       
       const target = e.target as HTMLInputElement;
@@ -289,7 +289,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
       const textAfter = newChecklistItem.substring(end);
       
       const fullText = textBefore + pastedText + textAfter;
-      const lines = fullText.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '');
+      const lines = fullText.split(/[\n\\]/).map(line => line.trim()).filter(line => line !== '');
       
       if (lines.length > 0 && activeBike) {
         const newItems: ChecklistItem[] = lines.map(line => ({

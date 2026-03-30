@@ -60,7 +60,7 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const pastedText = e.clipboardData.getData('text');
-    if (pastedText.includes('\n')) {
+    if (pastedText.includes('\n') || pastedText.includes('\\')) {
       e.preventDefault();
       
       const target = e.target as HTMLInputElement;
@@ -71,7 +71,7 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
       const textAfter = newTodoText.substring(end);
       
       const fullText = textBefore + pastedText + textAfter;
-      const lines = fullText.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '');
+      const lines = fullText.split(/[\n\\]/).map(line => line.trim()).filter(line => line !== '');
       
       if (lines.length > 0) {
         lines.forEach(line => {

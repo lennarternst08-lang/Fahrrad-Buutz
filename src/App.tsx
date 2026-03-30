@@ -846,7 +846,7 @@ function App() {
 
     const qBikes = query(collection(db, 'bikes'), where('userId', '==', user.uid));
     const unsubBikes = onSnapshot(qBikes, (snapshot) => {
-      const fetchedBikes = snapshot.docs.map(doc => doc.data() as Bike);
+      const fetchedBikes = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Bike));
       setBikes(fetchedBikes);
       setIsLoading(false);
     }, (error) => {
@@ -856,13 +856,13 @@ function App() {
 
     const qTodos = query(collection(db, 'todos'), where('userId', '==', user.uid));
     const unsubTodos = onSnapshot(qTodos, (snapshot) => {
-      const fetchedTodos = snapshot.docs.map(doc => doc.data() as DailyTodo);
+      const fetchedTodos = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DailyTodo));
       setDailyTodos(fetchedTodos);
     }, (error) => handleFirestoreError(error, OperationType.GET, 'todos'));
 
     const qLogs = query(collection(db, 'logs'), where('userId', '==', user.uid));
     const unsubLogs = onSnapshot(qLogs, (snapshot) => {
-      const fetchedLogs = snapshot.docs.map(doc => doc.data() as Log);
+      const fetchedLogs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Log));
       setLogs(fetchedLogs.sort((a, b) => b.timestamp - a.timestamp));
     }, (error) => handleFirestoreError(error, OperationType.GET, 'logs'));
 
