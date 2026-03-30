@@ -1320,6 +1320,54 @@ function App() {
     setIsProfileMenuOpen(false);
   };
 
+  const exportOpenProjectsCSV = () => {
+    const csvLines: string[] = [];
+    
+    // Header
+    csvLines.push('Fahrrad,Status,Einkaufspreis (€),Kaufdatum,Wann dran geschraubt,Investierte Zeit (h),Materialkosten (€),Materialien,Checkliste (Erledigt/Gesamt),Offene To-Dos,Notizen');
+
+    const openBikes = bikes.filter(b => b.status === 'Zu reparieren');
+
+    openBikes.forEach(b => {
+      const expensesTotal = b.expenses.reduce((sum, e) => sum + e.amount, 0);
+      const expensesList = b.expenses.map(e => `${e.description} (${e.amount}€)`).join('; ');
+      
+      const checklistCompleted = b.checklist.filter(c => c.completed).length;
+      const checklistTotal = b.checklist.length;
+      const openTodos = b.checklist.filter(c => !c.completed).map(c => c.text).join('; ');
+
+      // Extract unique dates from workLogs if available, otherwise fallback to lastModified
+      let workDates = '';
+      if (b.workLogs && b.workLogs.length > 0) {
+        const dates = b.workLogs.map(w => {
+          if (typeof w.timestamp === 'string') return w.timestamp.split('T')[0];
+          return new Date(w.timestamp).toISOString().split('T')[0];
+        });
+        workDates = Array.from(new Set(dates)).join(', ');
+      } else {
+        workDates = new Date(b.lastModified).toISOString().split('T')[0];
+      }
+
+      const timeHours = (b.timeSpentSeconds / 3600).toFixed(2);
+      const notes = (b.notes || '').replace(/"/g, '""').replace(/\n/g, ' ');
+
+      csvLines.push(
+        `"${b.name}","${b.status}",${b.purchasePrice.toFixed(2)},"${b.purchaseDate}","${workDates}",${timeHours},${expensesTotal.toFixed(2)},"${expensesList}","${checklistCompleted}/${checklistTotal}","${openTodos}","${notes}"`
+      );
+    });
+
+    const csvContent = csvLines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Zu_reparieren_FlipBike_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setIsProfileMenuOpen(false);
+  };
+
   const downloadCharts = () => {
     const canvases = document.querySelectorAll('canvas');
     if (canvases.length === 0) {
@@ -1534,6 +1582,13 @@ function App() {
                 >
                   <Download className="w-4 h-4 mr-2" />
                   Vollständiger Projekt-Report (CSV)
+                </button>
+                <button 
+                  onClick={exportOpenProjectsCSV}
+                  className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
+                >
+                  <Wrench className="w-4 h-4 mr-2" />
+                  Zu reparieren Report (CSV)
                 </button>
                 <button 
                   onClick={downloadCharts}
