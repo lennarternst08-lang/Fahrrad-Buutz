@@ -58,6 +58,31 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = e.clipboardData.getData('text');
+    if (pastedText.includes('\n')) {
+      e.preventDefault();
+      
+      const target = e.target as HTMLInputElement;
+      const start = target.selectionStart || 0;
+      const end = target.selectionEnd || 0;
+      
+      const textBefore = newTodoText.substring(0, start);
+      const textAfter = newTodoText.substring(end);
+      
+      const fullText = textBefore + pastedText + textAfter;
+      const lines = fullText.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '');
+      
+      if (lines.length > 0) {
+        lines.forEach(line => {
+          addTodo(line, selectedBikeId);
+        });
+        setNewTodoText('');
+        setShowBikeSuggestions(false);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center space-x-4 mb-6">
@@ -78,6 +103,7 @@ export function DailyTodoModule({ todos, addTodo, toggleTodo, deleteTodo, bikes,
                 placeholder="Was steht heute an? (z.B. Cube putzen)"
                 value={newTodoText}
                 onChange={handleTextChange}
+                onPaste={handlePaste}
                 className="flex-1"
               />
               <Button type="submit">

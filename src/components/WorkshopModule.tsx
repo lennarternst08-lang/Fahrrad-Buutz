@@ -276,6 +276,37 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
     setNewChecklistItem('');
   };
 
+  const handleChecklistPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = e.clipboardData.getData('text');
+    if (pastedText.includes('\n')) {
+      e.preventDefault();
+      
+      const target = e.target as HTMLInputElement;
+      const start = target.selectionStart || 0;
+      const end = target.selectionEnd || 0;
+      
+      const textBefore = newChecklistItem.substring(0, start);
+      const textAfter = newChecklistItem.substring(end);
+      
+      const fullText = textBefore + pastedText + textAfter;
+      const lines = fullText.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '');
+      
+      if (lines.length > 0 && activeBike) {
+        const newItems: ChecklistItem[] = lines.map(line => ({
+          id: Math.random().toString(36).substr(2, 9),
+          text: line,
+          completed: false,
+        }));
+        
+        updateBike(activeBike.id, {
+          checklist: [...(activeBike.checklist || []), ...newItems],
+        });
+        
+        setNewChecklistItem('');
+      }
+    }
+  };
+
   const toggleChecklistItem = (itemId: string) => {
     if (!activeBike) return;
     const updatedChecklist = activeBike.checklist.map(item => 
@@ -487,6 +518,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
                   value={newChecklistItem}
                   onChange={(e) => setNewChecklistItem(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddChecklistItem()}
+                  onPaste={handleChecklistPaste}
                   className="flex-1"
                 />
                 <Button size="icon" onClick={handleAddChecklistItem}>
