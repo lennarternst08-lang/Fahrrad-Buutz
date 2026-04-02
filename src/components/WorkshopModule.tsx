@@ -45,7 +45,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
   const [isRunning, setIsRunning] = useState(false);
   const [time, setTime] = useState(0);
   const [manualTime, setManualTime] = useState('');
-  const [lastResetTime, setLastResetTime] = useState<number | null>(null);
+  const [lastResetTime, setLastResetTime] = useState<{ time: number, workLogs: WorkLog[] } | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const timerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -254,8 +254,39 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
     
     setTime((currentTime) => {
       const newTime = Math.max(0, currentTime + minutes * 60);
+      const diff = newTime - currentTime;
+      
+      let updatedWorkLogs = [...(activeBike.workLogs || [])];
+      
+      if (diff !== 0) {
+        if (diff < 0) {
+          // Reduce from the last workLog(s)
+          let remainingDiff = Math.abs(diff);
+          for (let i = updatedWorkLogs.length - 1; i >= 0; i--) {
+            if (updatedWorkLogs[i].durationSeconds >= remainingDiff) {
+              updatedWorkLogs[i] = { ...updatedWorkLogs[i], durationSeconds: updatedWorkLogs[i].durationSeconds - remainingDiff };
+              remainingDiff = 0;
+              break;
+            } else {
+              remainingDiff -= updatedWorkLogs[i].durationSeconds;
+              updatedWorkLogs[i] = { ...updatedWorkLogs[i], durationSeconds: 0 };
+            }
+          }
+          // Filter out 0 duration logs
+          updatedWorkLogs = updatedWorkLogs.filter(log => log.durationSeconds > 0);
+        } else {
+          // Add a new workLog for the added time
+          updatedWorkLogs.push({
+            id: Date.now().toString(),
+            timestamp: new Date().toISOString(),
+            durationSeconds: diff
+          });
+        }
+      }
+
       updateBike(activeBike.id, { 
         timeSpentSeconds: newTime,
+        workLogs: updatedWorkLogs,
         ...(isRunning ? { startTime: Date.now() } : {})
       });
       return newTime;
@@ -441,9 +472,10 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
                   className="w-14 h-14 rounded-full border-slate-700 hover:bg-slate-800"
                   onClick={() => {
                     setTime((prev) => {
-                      setLastResetTime(prev);
+                      setLastResetTime({ time: prev, workLogs: activeBike.workLogs || [] });
                       updateBike(activeBike.id, { 
                         timeSpentSeconds: 0,
+                        workLogs: [],
                         ...(isRunning ? { startTime: Date.now() } : {})
                       });
                       return 0;
@@ -472,9 +504,10 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
                     variant="outline"
                     className="w-14 h-14 rounded-full border-orange-500/50 hover:bg-orange-500/10 text-orange-400"
                     onClick={() => {
-                      setTime(lastResetTime);
+                      setTime(lastResetTime.time);
                       updateBike(activeBike.id, { 
-                        timeSpentSeconds: lastResetTime,
+                        timeSpentSeconds: lastResetTime.time,
+                        workLogs: lastResetTime.workLogs,
                         ...(isRunning ? { startTime: Date.now() } : {})
                       });
                       setLastResetTime(null);
@@ -499,6 +532,61 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
                 <Button variant="secondary" onClick={handleManualTimeAdjust}>
                   Korr.
                 </Button>
+              </div>
+
+              {/* Work Logs List */}
+              <div className="w-full mt-8 border-t border-slate-800 pt-6">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Arbeits-Protokoll</h4>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                  {isRunning && activeBike.startTime && (
+                    <div className="flex items-center justify-between p-2 rounded bg-orange-500/10 border border-orange-500/20">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+                        <span className="text-sm text-orange-400">
+                          Stoppuhr um {new Date(activeBike.startTime).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} gestartet
+                        </span>
+                      </div>
+                      <span className="text-xs text-orange-500/70 italic">nicht synchronisiert</span>
+                    </div>
+                  )}
+                  {(!activeBike.workLogs || activeBike.workLogs.length === 0) && !isRunning ? (
+                    <p className="text-sm text-slate-500 text-center py-2">Noch keine Zeiten erfasst</p>
+                  ) : (
+                    [...(activeBike.workLogs || [])].reverse().map(log => (
+                      <div key={log.id} className="flex items-center justify-between p-2 rounded bg-slate-800/50 hover:bg-slate-800 transition-colors group">
+                        <div className="flex flex-col">
+                          <span className="text-sm text-slate-300">
+                            {new Date(log.timestamp).toLocaleDateString('de-DE')} {new Date(log.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <span className="text-sm font-mono text-slate-400">
+                            {formatTime(log.durationSeconds)}
+                          </span>
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Möchtest du diesen Eintrag wirklich löschen? Die Zeit wird von der Gesamtzeit abgezogen.')) {
+                                const updatedWorkLogs = activeBike.workLogs!.filter(l => l.id !== log.id);
+                                updateBike(activeBike.id, {
+                                  workLogs: updatedWorkLogs,
+                                  timeSpentSeconds: Math.max(0, activeBike.timeSpentSeconds - log.durationSeconds)
+                                });
+                                // Update local time state if not running
+                                if (!isRunning) {
+                                  setTime(Math.max(0, activeBike.timeSpentSeconds - log.durationSeconds));
+                                }
+                              }
+                            }}
+                            className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Eintrag löschen"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -321,6 +321,14 @@ export function TrackingModule({
       if (bike.purchaseDate && isSamePeriod(parseISO(bike.purchaseDate), period, timeframe)) {
         bought.push({ name: bike.name, price: bike.purchasePrice });
         totalPurchasePrice += bike.purchasePrice;
+        
+        // Fallback for unlogged time (attribute to purchase date)
+        const totalLoggedTime = (bike.workLogs || []).reduce((sum, l) => sum + l.durationSeconds, 0);
+        const unloggedTime = Math.max(0, bike.timeSpentSeconds - totalLoggedTime);
+        if (unloggedTime > 0) {
+          totalHours += unloggedTime / 3600;
+          workSessions.push({ bikeName: `${bike.name} (Basis)`, duration: unloggedTime });
+        }
       }
       if (bike.saleDate && isSamePeriod(parseISO(bike.saleDate), period, timeframe)) {
         sold.push({ name: bike.name, price: bike.sellingPrice || 0 });
@@ -562,6 +570,64 @@ export function TrackingModule({
         fill: true,
       }
     ]
+  };
+
+  const stundenAufgebrachtChartData = {
+    labels,
+    datasets: [{
+      label: 'Stunden aufgebracht (h)',
+      data: periodDetails.map(p => p.totalHours),
+      borderColor: '#8b5cf6',
+      backgroundColor: 'rgba(139, 92, 246, 0.1)',
+      tension: 0.1,
+      fill: true,
+    }]
+  };
+
+  const stundenAufgebrachtOptions = {
+    ...commonOptions,
+    plugins: {
+      ...commonOptions.plugins,
+      tooltip: {
+        ...commonOptions.plugins.tooltip,
+        callbacks: {
+          ...commonOptions.plugins.tooltip.callbacks,
+          label: (context: any) => {
+            let label = context.dataset.label || '';
+            if (label) label += ': ';
+            if (context.parsed.y !== null) {
+              label += `${context.parsed.y.toFixed(1)} h`;
+            }
+            return label;
+          },
+          footer: (context: any) => {
+            const index = context[0].dataIndex;
+            const details = periodDetails[index];
+            const lines: string[] = [];
+            if (details.workSessions.length > 0) {
+              const bikeHours: Record<string, number> = {};
+              details.workSessions.forEach(ws => {
+                bikeHours[ws.bikeName] = (bikeHours[ws.bikeName] || 0) + ws.duration / 3600;
+              });
+              Object.entries(bikeHours).forEach(([name, hours]) => {
+                lines.push(`${name}: ${hours.toFixed(1)}h`);
+              });
+            }
+            return lines.length > 0 ? '\n' + lines.join('\n') : '';
+          }
+        }
+      }
+    },
+    scales: {
+      ...commonOptions.scales,
+      y: {
+        ...commonOptions.scales.y,
+        ticks: {
+          ...commonOptions.scales.y.ticks,
+          callback: (value: any) => `${value} h`
+        }
+      }
+    }
   };
 
   // Filter and sort bikes for inventory
@@ -1205,6 +1271,18 @@ export function TrackingModule({
               </div>
             </CardContent>
           </Card>
+          <Card className="lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-bold text-slate-200 text-center">
+                Stunden aufgebracht
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <div className="h-[250px]">
+                <Line data={stundenAufgebrachtChartData} options={stundenAufgebrachtOptions} />
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
@@ -1396,10 +1474,43 @@ export function TrackingModule({
                   onClick={() => {
                     const totalSeconds = (editHours * 3600) + (editMinutes * 60);
                     const bike = bikes.find(b => b.id === editTimeBikeId);
-                    updateBike(editTimeBikeId, { 
-                      timeSpentSeconds: totalSeconds,
-                      ...(bike?.startTime ? { startTime: Date.now() } : {})
-                    });
+                    
+                    if (bike) {
+                      const diff = totalSeconds - (bike.timeSpentSeconds || 0);
+                      let updatedWorkLogs = [...(bike.workLogs || [])];
+                      
+                      if (diff !== 0) {
+                        if (diff < 0) {
+                          // Reduce from the last workLog(s)
+                          let remainingDiff = Math.abs(diff);
+                          for (let i = updatedWorkLogs.length - 1; i >= 0; i--) {
+                            if (updatedWorkLogs[i].durationSeconds >= remainingDiff) {
+                              updatedWorkLogs[i] = { ...updatedWorkLogs[i], durationSeconds: updatedWorkLogs[i].durationSeconds - remainingDiff };
+                              remainingDiff = 0;
+                              break;
+                            } else {
+                              remainingDiff -= updatedWorkLogs[i].durationSeconds;
+                              updatedWorkLogs[i] = { ...updatedWorkLogs[i], durationSeconds: 0 };
+                            }
+                          }
+                          // Filter out 0 duration logs
+                          updatedWorkLogs = updatedWorkLogs.filter(log => log.durationSeconds > 0);
+                        } else {
+                          // Add a new workLog for the added time
+                          updatedWorkLogs.push({
+                            id: Date.now().toString(),
+                            timestamp: new Date().toISOString(),
+                            durationSeconds: diff
+                          });
+                        }
+                      }
+
+                      updateBike(editTimeBikeId, { 
+                        timeSpentSeconds: totalSeconds,
+                        workLogs: updatedWorkLogs,
+                        ...(bike.startTime ? { startTime: Date.now() } : {})
+                      });
+                    }
                     setEditTimeBikeId(null);
                   }} 
                   className="bg-orange-500 hover:bg-orange-600 text-white"

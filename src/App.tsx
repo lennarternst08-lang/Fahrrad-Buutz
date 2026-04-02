@@ -906,9 +906,9 @@ function App() {
       timestamp: Date.now(),
       message,
       module,
-      revertAction,
-      userId: auth.currentUser?.uid
     };
+    if (revertAction) newLog.revertAction = revertAction;
+    if (auth.currentUser?.uid) newLog.userId = auth.currentUser.uid;
     
     // Optimistically update local state
     setLogs(prev => [newLog, ...prev].slice(0, 1000));
@@ -1040,16 +1040,16 @@ function App() {
       id: Math.random().toString(36).substr(2, 9),
       text,
       completed: false,
-      linkedBikeId,
-      userId: auth.currentUser?.uid
     };
+    if (linkedBikeId) newTodo.linkedBikeId = linkedBikeId;
+    if (auth.currentUser?.uid) newTodo.userId = auth.currentUser.uid;
     
     // Optimistically update local state
     setDailyTodos(prev => [...prev, newTodo]);
 
     if (auth.currentUser) {
       setDoc(doc(db, 'todos', newTodo.id), newTodo).catch(e => {
-        console.error("Failed to add todo to DB:", e);
+        handleFirestoreError(e, OperationType.CREATE, 'todos');
       });
     }
     addLog(`To-Do hinzugefügt: "${newTodo.text}"`, 'system');
@@ -1067,11 +1067,14 @@ function App() {
 
     if (auth.currentUser) {
       setIsSyncing(true);
-      updateDoc(doc(db, 'todos', id), { completed: newStatus })
+      updateDoc(doc(db, 'todos', id), { 
+        completed: newStatus,
+        userId: auth.currentUser.uid // Ensure legacy todos get a userId
+      })
         .then(() => setIsSyncing(false))
         .catch(e => {
           setIsSyncing(false);
-          console.error("Failed to toggle todo in DB:", e);
+          handleFirestoreError(e, OperationType.UPDATE, 'todos');
         });
     }
     addLog(`To-Do "${todo.text}" als ${newStatus ? 'erledigt' : 'offen'} markiert`, 'system');
@@ -1088,7 +1091,7 @@ function App() {
 
     if (auth.currentUser) {
       deleteDoc(doc(db, 'todos', id)).catch(e => {
-        console.error("Failed to delete todo from DB:", e);
+        handleFirestoreError(e, OperationType.DELETE, 'todos');
       });
     }
   }, [addLog, dailyTodos]);
