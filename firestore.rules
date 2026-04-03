@@ -59,6 +59,18 @@ service cloud.firestore {
              data.userId == request.auth.uid;
     }
 
+    function isValidServiceRequest(data) {
+      return hasRequiredFields(['id', 'name', 'issue', 'dropoffTime', 'status', 'userId']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.issue is string && data.issue.size() > 0 && data.issue.size() < 500 &&
+             data.dropoffTime is string && data.dropoffTime.size() < 100 &&
+             data.status in ["Ausstehend", "Angenommen", "In Bearbeitung", "Fertig", "Abgeholt"] &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 50)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
+             data.userId == request.auth.uid;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -86,6 +98,13 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isAuthenticated() && isValidLog(request.resource.data);
       allow update: if isAuthenticated() && isValidLog(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /serviceRequests/{requestId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidServiceRequest(request.resource.data);
+      allow update: if isAuthenticated() && isValidServiceRequest(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
     }
   }

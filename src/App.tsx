@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, Component, ReactNode } from 'r
 import { TrackingModule } from './components/TrackingModule';
 import { WorkshopModule } from './components/WorkshopModule';
 import { DailyTodoModule } from './components/DailyTodoModule';
-import { Bike, DailyTodo, Log } from './types';
+import { Bike, DailyTodo, Log, ServiceRequest } from './types';
 import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X, LogIn, LogOut, RotateCcw, Calendar } from 'lucide-react';
 import { auth, db, signInWithGoogle, logout } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -727,6 +727,18 @@ function App() {
     return [];
   });
 
+  const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>(() => {
+    const saved = localStorage.getItem('flipbike_service_requests');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse service requests from local storage', e);
+      }
+    }
+    return [];
+  });
+
   const [activeWorkshopBikeId, setActiveWorkshopBikeId] = useState<string | null>(() => {
     return localStorage.getItem('flipbike_active_workshop_id');
   });
@@ -860,6 +872,12 @@ function App() {
       setDailyTodos(fetchedTodos);
     }, (error) => handleFirestoreError(error, OperationType.GET, 'todos'));
 
+    const qServiceRequests = query(collection(db, 'serviceRequests'), where('userId', '==', user.uid));
+    const unsubServiceRequests = onSnapshot(qServiceRequests, (snapshot) => {
+      const fetchedRequests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as ServiceRequest));
+      setServiceRequests(fetchedRequests);
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'serviceRequests'));
+
     const qLogs = query(collection(db, 'logs'), where('userId', '==', user.uid));
     const unsubLogs = onSnapshot(qLogs, (snapshot) => {
       const fetchedLogs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Log));
@@ -869,6 +887,7 @@ function App() {
     return () => {
       unsubBikes();
       unsubTodos();
+      unsubServiceRequests();
       unsubLogs();
     };
   }, [user, isAuthReady]);
@@ -885,6 +904,12 @@ function App() {
       localStorage.setItem('flipbike_todos', JSON.stringify(dailyTodos));
     }
   }, [dailyTodos, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      localStorage.setItem('flipbike_service_requests', JSON.stringify(serviceRequests));
+    }
+  }, [serviceRequests, isLoading]);
 
   useEffect(() => {
     if (activeWorkshopBikeId && !isLoading) {
@@ -1095,6 +1120,43 @@ function App() {
       });
     }
   }, [addLog, dailyTodos]);
+
+  const addServiceRequest = useCallback((request: Omit<ServiceRequest, 'id' | 'userId'>) => {
+    const newRequest: ServiceRequest = {
+      ...request,
+      id: Math.random().toString(36).substr(2, 9),
+    };
+    if (auth.currentUser?.uid) newRequest.userId = auth.currentUser.uid;
+    
+    setServiceRequests(prev => [...prev, newRequest]);
+
+    if (auth.currentUser) {
+      setDoc(doc(db, 'serviceRequests', newRequest.id), newRequest).catch(e => {
+        handleFirestoreError(e, OperationType.CREATE, 'serviceRequests');
+      });
+    }
+    addLog(`Service-Anfrage hinzugefügt: "${newRequest.name}"`, 'system');
+  }, [addLog]);
+
+  const updateServiceRequest = useCallback((id: string, updates: Partial<ServiceRequest>) => {
+    setServiceRequests(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+
+    if (auth.currentUser) {
+      updateDoc(doc(db, 'serviceRequests', id), updates).catch(e => {
+        handleFirestoreError(e, OperationType.UPDATE, 'serviceRequests');
+      });
+    }
+  }, []);
+
+  const deleteServiceRequest = useCallback((id: string) => {
+    setServiceRequests(prev => prev.filter(r => r.id !== id));
+
+    if (auth.currentUser) {
+      deleteDoc(doc(db, 'serviceRequests', id)).catch(e => {
+        handleFirestoreError(e, OperationType.DELETE, 'serviceRequests');
+      });
+    }
+  }, []);
 
   const revertLogAction = (logId: string) => {
     const log = logs.find(l => l.id === logId);
@@ -1686,6 +1748,10 @@ function App() {
               onNavigateBack={() => handleTabChange('workshop')}
               onNavigateToBike={navigateToWorkshopBike}
               addLog={addLog}
+              serviceRequests={serviceRequests}
+              addServiceRequest={addServiceRequest}
+              updateServiceRequest={updateServiceRequest}
+              deleteServiceRequest={deleteServiceRequest}
             />
           )}
         </div>

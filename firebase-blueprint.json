@@ -85,6 +85,22 @@
         "userId": { "type": "string" }
       },
       "required": ["id", "timestamp", "message", "module", "userId"]
+    },
+    "ServiceRequest": {
+      "title": "ServiceRequest",
+      "description": "A service request from a neighbor or customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "issue": { "type": "string" },
+        "dropoffTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["Ausstehend", "Angenommen", "In Bearbeitung", "Fertig", "Abgeholt"] },
+        "phone": { "type": "string" },
+        "notes": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "issue", "dropoffTime", "status", "userId"]
     }
   },
   "firestore": {
@@ -99,6 +115,10 @@
     "/logs/{logId}": {
       "schema": { "$ref": "#/entities/Log" },
       "description": "User's activity logs"
+    },
+    "/serviceRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/ServiceRequest" },
+      "description": "User's service requests"
     }
   }
 }

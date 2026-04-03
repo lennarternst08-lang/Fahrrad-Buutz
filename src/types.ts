@@ -47,6 +47,17 @@ export interface DailyTodo {
   userId?: string;
 }
 
+export interface ServiceRequest {
+  id: string;
+  name: string;
+  issue: string;
+  dropoffTime: string;
+  status: 'Ausstehend' | 'Angenommen' | 'In Bearbeitung' | 'Fertig' | 'Abgeholt';
+  phone?: string;
+  notes?: string;
+  userId?: string;
+}
+
 export interface Log {
   id: string;
   timestamp: number;
