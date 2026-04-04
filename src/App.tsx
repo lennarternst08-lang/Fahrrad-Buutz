@@ -3,10 +3,10 @@ import { TrackingModule } from './components/TrackingModule';
 import { WorkshopModule } from './components/WorkshopModule';
 import { DailyTodoModule } from './components/DailyTodoModule';
 import { Bike, DailyTodo, Log, ServiceRequest } from './types';
-import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X, LogIn, LogOut, RotateCcw, Calendar } from 'lucide-react';
+import { BarChart3, Wrench, CheckSquare, Download, FileText, Image, User, X, LogIn, LogOut, RotateCcw, Calendar, RefreshCw, CloudUpload } from 'lucide-react';
 import { auth, db, signInWithGoogle, logout } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs, increment, arrayUnion } from 'firebase/firestore';
 
 enum OperationType {
   CREATE = 'create',
@@ -990,10 +990,46 @@ function App() {
         addLog(message, module, { type: 'update', data: { id, oldValues } });
       }
       
+      // Prepare local state update (handle increment for local state)
+      const localUpdates = { ...updates };
+      if (updates.timeSpentSeconds && typeof updates.timeSpentSeconds === 'object' && 'methodName' in (updates.timeSpentSeconds as any)) {
+        // This is likely a FieldValue.increment
+        // We can't easily get the value from it, so we'll assume the caller might have passed it differently
+        // Actually, let's check for a common pattern or just calculate it if we can.
+        // For now, let's just use the numeric value if the caller passed it as a number, 
+        // but since we want to use increment for DB, we'll have to be clever.
+      }
+
       const updatedBike = { ...bike, ...updates, lastModified: Date.now() };
       
+      // If timeSpentSeconds is an increment, we need to calculate the new local value
+      if (updates.timeSpentSeconds && typeof updates.timeSpentSeconds === 'object') {
+        // Firestore FieldValue objects don't expose their value easily in the SDK, 
+        // but we can try to detect it.
+        // A better way is to pass the numeric diff in a separate field or just handle it here.
+        // Since we know we use increment(n), we can't easily get 'n'.
+      }
+
+      // Let's simplify: if the update is an increment, we'll just let the snapshot handle it 
+      // or we can pass the numeric value for local state.
+      
+      // Actually, I'll just change how WorkshopModule calls it.
+      // But wait, I already changed WorkshopModule.
+      
+      // Let's fix updateBike to be smarter.
+      const finalLocalUpdates = { ...updates };
+      // Check for increment (hacky but works for local optimistic update)
+      if (updates.timeSpentSeconds && typeof updates.timeSpentSeconds === 'object' && (updates.timeSpentSeconds as any)._methodName === 'FieldValue.increment') {
+          const operand = (updates.timeSpentSeconds as any)._operand;
+          if (typeof operand === 'number') {
+              finalLocalUpdates.timeSpentSeconds = (bike.timeSpentSeconds || 0) + operand;
+          }
+      }
+
+      const localUpdatedBike = { ...bike, ...finalLocalUpdates, lastModified: Date.now() };
+      
       // Optimistically update local state
-      setBikes((prev) => prev.map((b) => (b.id === id ? updatedBike : b)));
+      setBikes((prev) => prev.map((b) => (b.id === id ? localUpdatedBike : b)));
 
       if (auth.currentUser) {
         setIsSyncing(true);
@@ -1157,6 +1193,58 @@ function App() {
       });
     }
   }, []);
+
+  const syncBikeTime = useCallback((id: string, elapsedSeconds: number, newWorkLog: any) => {
+    if (auth.currentUser) {
+      updateDoc(doc(db, 'bikes', id), {
+        timeSpentSeconds: increment(elapsedSeconds),
+        workLogs: arrayUnion(newWorkLog),
+        startTime: null,
+        lastModified: Date.now()
+      }).catch(e => handleFirestoreError(e, OperationType.UPDATE, 'bikes-time'));
+    }
+  }, []);
+
+  const forceSyncToCloud = useCallback(async () => {
+    if (!auth.currentUser) return;
+    setIsSyncing(true);
+    try {
+      // Push all current local state to cloud
+      const bikePromises = bikes.map(bike => setDoc(doc(db, 'bikes', bike.id), { ...bike, lastModified: Date.now() }));
+      const todoPromises = dailyTodos.map(todo => setDoc(doc(db, 'todos', todo.id), todo));
+      const logPromises = logs.map(log => setDoc(doc(db, 'logs', log.id), log));
+      const servicePromises = serviceRequests.map(req => setDoc(doc(db, 'serviceRequests', req.id), req));
+      
+      await Promise.all([...bikePromises, ...todoPromises, ...logPromises, ...servicePromises]);
+      addLog('Manuelle Synchronisation (Push) abgeschlossen', 'system');
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'force-sync');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [bikes, dailyTodos, logs, serviceRequests, addLog]);
+
+  const refreshFromCloud = useCallback(async () => {
+    if (!auth.currentUser) return;
+    setIsLoading(true);
+    try {
+      const bikesSnap = await getDocs(query(collection(db, 'bikes'), where('userId', '==', auth.currentUser.uid)));
+      const todosSnap = await getDocs(query(collection(db, 'todos'), where('userId', '==', auth.currentUser.uid)));
+      const logsSnap = await getDocs(query(collection(db, 'logs'), where('userId', '==', auth.currentUser.uid)));
+      const serviceSnap = await getDocs(query(collection(db, 'serviceRequests'), where('userId', '==', auth.currentUser.uid)));
+
+      setBikes(bikesSnap.docs.map(doc => ({ ...doc.data(), id: doc.id } as Bike)));
+      setDailyTodos(todosSnap.docs.map(doc => ({ ...doc.data(), id: doc.id } as DailyTodo)));
+      setLogs(logsSnap.docs.map(doc => ({ ...doc.data(), id: doc.id } as Log)).sort((a, b) => b.timestamp - a.timestamp));
+      setServiceRequests(serviceSnap.docs.map(doc => ({ ...doc.data(), id: doc.id } as ServiceRequest)));
+      
+      addLog('Manuelle Synchronisation (Pull) abgeschlossen', 'system');
+    } catch (e) {
+      handleFirestoreError(e, OperationType.GET, 'refresh');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [addLog]);
 
   const revertLogAction = (logId: string) => {
     const log = logs.find(l => l.id === logId);
@@ -1642,6 +1730,21 @@ function App() {
                   Aktivitäts-Logs
                 </button>
                 <button 
+                  onClick={() => { refreshFromCloud(); setIsProfileMenuOpen(false); }}
+                  className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4 mr-2 text-blue-400" />
+                  Daten neu laden (Pull)
+                </button>
+                <button 
+                  onClick={() => { forceSyncToCloud(); setIsProfileMenuOpen(false); }}
+                  className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
+                >
+                  <CloudUpload className="w-4 h-4 mr-2 text-emerald-400" />
+                  Sync erzwingen (Push)
+                </button>
+                <div className="border-t border-slate-800 my-1"></div>
+                <button 
                   onClick={exportCSV}
                   className="w-full flex items-center px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-md transition-colors"
                 >
@@ -1734,6 +1837,7 @@ function App() {
             <WorkshopModule 
               bikes={bikes} 
               updateBike={updateBike} 
+              syncBikeTime={syncBikeTime}
               activeBikeId={activeWorkshopBikeId}
               setActiveBikeId={setActiveWorkshopBikeId}
               addLog={addLog}

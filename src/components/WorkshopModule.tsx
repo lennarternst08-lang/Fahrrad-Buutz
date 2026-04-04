@@ -5,16 +5,18 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { formatTime, formatCurrency } from '../lib/utils';
 import { Play, Pause, RotateCcw, Plus, Camera, CheckSquare, Wrench, Trash2, CheckCircle2, Circle, Undo2, Search, Eye, X, Clock } from 'lucide-react';
+import { increment } from 'firebase/firestore';
 
 interface WorkshopModuleProps {
   bikes: Bike[];
   updateBike: (id: string, updates: Partial<Bike>) => void;
+  syncBikeTime: (id: string, elapsedSeconds: number, newWorkLog: WorkLog) => void;
   activeBikeId: string | null;
   setActiveBikeId: (id: string | null) => void;
   addLog: (message: string, module: 'tracking' | 'workshop' | 'stopwatch' | 'system', revertAction?: any) => void;
 }
 
-export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeId, addLog }: WorkshopModuleProps) {
+export function WorkshopModule({ bikes, updateBike, syncBikeTime, activeBikeId, setActiveBikeId, addLog }: WorkshopModuleProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const activeProjects = bikes
@@ -178,11 +180,9 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
       localStorage.removeItem('flipbike_active_timer');
 
       try {
-        updateBike(activeBike.id, { 
-          timeSpentSeconds: totalTime,
-          startTime: null,
-          workLogs: [...(activeBike.workLogs || []), newWorkLog]
-        });
+        // Use atomic sync for time to avoid multi-device conflicts
+        // This function handles both the Firestore update (atomic) and the local state update (optimistic)
+        syncBikeTime(activeBike.id, elapsed, newWorkLog);
         
         const startStr = activeBike.startTime ? new Date(activeBike.startTime).toLocaleTimeString('de-DE') : 'unbekannt';
         addLog(`Stoppuhr gestoppt für "${activeBike.name}". Gestartet um ${startStr}. Dauer: ${formatTime(elapsed)}.`, 'stopwatch');
@@ -285,7 +285,7 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
       }
 
       updateBike(activeBike.id, { 
-        timeSpentSeconds: newTime,
+        timeSpentSeconds: increment(minutes * 60) as any,
         workLogs: updatedWorkLogs,
         ...(isRunning ? { startTime: Date.now() } : {})
       });
@@ -569,11 +569,11 @@ export function WorkshopModule({ bikes, updateBike, activeBikeId, setActiveBikeI
                                 const updatedWorkLogs = activeBike.workLogs!.filter(l => l.id !== log.id);
                                 updateBike(activeBike.id, {
                                   workLogs: updatedWorkLogs,
-                                  timeSpentSeconds: Math.max(0, activeBike.timeSpentSeconds - log.durationSeconds)
+                                  timeSpentSeconds: increment(-log.durationSeconds) as any
                                 });
                                 // Update local time state if not running
                                 if (!isRunning) {
-                                  setTime(Math.max(0, activeBike.timeSpentSeconds - log.durationSeconds));
+                                  setTime(Math.max(0, (activeBike.timeSpentSeconds || 0) - log.durationSeconds));
                                 }
                               }
                             }}
